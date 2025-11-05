@@ -1,2 +1,3 @@
 # SangerOrganoidBiobank
-This repository holds scripts and data for Organoid Biobank publication
+This repository holds scripts for Organoid Biobank publication.
+User can execute `R Markdown` script to generate all the main figures in the publication
