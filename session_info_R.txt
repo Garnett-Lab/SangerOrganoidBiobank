@@ -1,0 +1,216 @@
+R version 4.5.0 (2025-04-11)
+Platform: x86_64-apple-darwin20
+Running under: macOS Sequoia 15.7.1
+
+Matrix products: default
+BLAS:   /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libBLAS.dylib 
+LAPACK: /Library/Frameworks/R.framework/Versions/4.5-x86_64/Resources/lib/libRlapack.dylib;  LAPACK version 3.12.1
+
+locale:
+en_US.UTF-8/en_US.UTF-8/en_US.UTF-8/C/en_US.UTF-8/en_US.UTF-8
+
+time zone: Europe/London
+tzcode source: internal
+
+attached base packages:
+stats4
+tools
+stats
+graphics
+grDevices utils
+datasets
+methods
+base     
+
+other attached packages:
+lmtest_0.9-40
+zoo_1.8-14
+scales_1.4.0
+digest_0.6.37              
+msigdbr_25.1.1
+CoRe_1.0.0
+sva_3.56.0
+genefilter_1.90.0          
+mgcv_1.9-1
+nlme_3.1-168
+CRISPRcleanR_3.0.1
+jsonlite_2.0.0             
+Rqc_1.42.0
+Rsubread_2.22.1
+ShortRead_1.66.0
+GenomicAlignments_1.44.0   
+SummarizedExperiment_1.38.1
+Biobase_2.68.0
+MatrixGenerics_1.20.0
+matrixStats_1.5.0          
+Rsamtools_2.24.0
+GenomicRanges_1.60.0
+Biostrings_2.76.0 
+GenomeInfoDb_1.44.1        
+XVector_0.48.0 
+IRanges_2.42.0
+S4Vectors_0.46.0
+BiocParallel_1.42.1        
+BiocGenerics_0.54.0
+generics_0.1.4
+BiocManager_1.30.26
+PRROC_1.4                  
+rlang_1.1.6
+pracma_2.4.4
+withr_3.0.2
+pROC_1.18.5                
+DNAcopy_1.82.0
+clusterProfiler_4.16.0
+arrow_21.0.0 
+ggnewscale_0.5.2           
+ggpubr_0.6.1
+rstatix_0.7.2
+cowplot_1.2.0
+lubridate_1.9.4            
+forcats_1.0.0
+stringr_1.5.1
+dplyr_1.1.4
+purrr_1.1.0                
+readr_2.1.5
+tidyr_1.3.1
+tibble_3.3.0
+ggplot2_3.5.2              
+tidyverse_2.0.0
+data.table_1.17.8          
+
+loaded via a namespace (and not attached):
+fs_1.6.6
+ProtGenerics_1.40.0
+bitops_1.0-9
+enrichplot_1.28.4
+httr_1.4.7              
+RColorBrewer_1.1-3
+backports_1.5.0
+R6_2.6.1
+lazyeval_0.2.2
+gridExtra_2.3           
+cli_3.6.5
+yulab.utils_0.2.0
+gson_0.1.0
+foreign_0.8-90
+DOSE_4.2.0              
+R.utils_2.13.0
+dichromat_2.0-0.1
+BSgenome_1.76.0
+limma_3.64.1
+rstudioapi_0.17.1       
+RSQLite_2.4.2
+gridGraphics_0.5-1
+BiocIO_1.18.0
+hwriter_1.3.2.1
+car_3.1-3               
+GO.db_3.21.0 
+Matrix_1.7-3
+nterp_1.1-6
+abind_1.4-8
+R.methodsS3_1.8.2       
+lifecycle_1.0.4
+yaml_2.3.10
+edgeR_4.6.3
+carData_3.0-5
+qvalue_2.40.0           
+SparseArray_1.8.1
+grid_4.5.0
+blob_1.2.4
+promises_1.3.3
+crayon_1.5.3            
+pwalign_1.4.0
+ggtangle_0.0.7
+lattice_0.22-6
+GenomicFeatures_1.60.0
+annotate_1.86.1         
+KEGGREST_1.48.1
+pillar_1.11.0
+knitr_1.50
+fgsea_1.34.2
+rjson_0.2.23            
+codetools_0.2-20
+fastmatch_1.1-6
+glue_1.8.0
+ggfun_0.2.0
+vctrs_0.6.5             
+png_0.1-8
+treeio_1.32.0
+gtable_0.3.6
+assertthat_0.2.1
+cachem_1.1.0            
+xfun_0.52
+S4Arrays_1.8.1
+mime_0.13
+survival_3.8-3
+pheatmap_1.0.13         
+statmod_1.5.0
+ggtree_3.16.3 
+bit64_4.6.0-1
+GenomicFiles_1.44.1
+rpart_4.1.24            
+colorspace_2.1-1
+DBI_1.2.3
+Hmisc_5.2-3 
+nnet_7.3-20
+tidyselect_1.2.1        
+bit_4.6.0
+compiler_4.5.0
+curl_6.4.0
+htmlTable_2.4.3
+DelayedArray_0.34.1     
+rtracklayer_1.68.0
+checkmate_2.3.2
+rmarkdown_2.29
+htmltools_0.5.8.1
+pkgconfig_2.0.3         
+jpeg_0.1-11
+base64enc_0.1-3
+fastmap_1.2.0
+ensembldb_2.32.0 
+htmlwidgets_1.6.4       
+UCSC.utils_1.4.0
+shiny_1.11.1
+farver_2.1.2
+GOSemSim_2.34.0
+R.oo_1.27.1             
+VariantAnnotation_1.54.1
+RCurl_1.98-1.17 
+magrittr_2.0.3
+Formula_1.2-5
+GenomeInfoDbData_1.2.14 
+ggplotify_0.1.2
+patchwork_1.3.1
+Rcpp_1.1.0
+ape_5.8-1
+babelgene_22.9          
+stringi_1.8.7
+plyr_1.8.9
+parallel_4.5.0
+ggrepel_0.9.6
+deldir_2.0-4            
+splines_4.5.0
+hms_1.1.3
+locfit_1.5-9.12
+igraph_2.1.4
+ggsignif_0.6.4          
+markdown_2.0
+reshape2_1.4.4
+XML_3.99-0.18
+evaluate_1.0.4
+latticeExtra_0.6-30     
+biovizBase_1.56.0
+tzdb_0.5.0
+httpuv_1.6.16
+broom_1.0.9
+xtable_1.8-4            
+restfulr_0.0.16
+AnnotationFilter_1.32.0
+tidytree_0.4.6
+later_1.4.2
+aplot_0.2.8             
+memoise_2.0.1
+AnnotationDbi_1.70.0
+cluster_2.1.8.1
+timechange_0.3.0
+BiocStyle_2.36.0 

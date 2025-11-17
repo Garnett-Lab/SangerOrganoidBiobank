@@ -1,0 +1,1551 @@
+---
+title: "Main figures - A tumour-derived organoid biobank defines a functional map of gene dependencies"
+author:
+  name: Carmen Herranz-Ors
+  affiliation: Wellcome Sanger Institute, Hinxton, Cambridge CB10 1SA, UK
+  email: ch24@sanger.ac.uk
+date: 
+output: html_document
+---
+
+```{r setup, echo=TRUE}
+# Load required libraries
+library(data.table)
+library(tidyverse)
+library(cowplot)
+library(rstatix)
+library(ggpubr)
+library(ggnewscale)
+library(arrow)
+library(clusterProfiler)
+```
+
+# Custom theme function for consistent plot formatting
+```{r}
+common_ggplot2 <- theme_bw(base_line_size = 0.15) + 
+  theme(axis.text.x=element_text(angle = 90, size = 5, hjust = 1, vjust = 0.5, colour="black"),
+        axis.text.y=element_text(size=5, colour="black"),
+        axis.title.y=element_text(size=6, colour="black"),
+        axis.title.x=element_text(size=6, colour="black"),
+        legend.title = element_text(size=6, colour="black"),
+        legend.text = element_text(size=5, colour="black"),
+        legend.position = "right",
+        legend.key = element_blank(),
+        axis.ticks= element_line(linewidth=0.2),
+        plot.margin=unit(c(0,0.1,0.1,0.1),"cm"),
+        plot.title=element_text(size=7, colour="black")) +
+  theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        panel.border = element_rect(linewidth = 0.25),
+        text=element_text(colour="black")) +
+  theme(plot.background = element_blank(),
+        strip.background = element_blank(), 
+        strip.text.x = element_blank())
+```
+
+
+# FIGURE 1
+## Panel b - Derivation success rates by tumor type
+```{r}
+# Load derivation data from supplementary table 1.1
+QC_success_rate <- as.data.frame(fread('/path_to_folder/supplementary_table_1.1.csv'))
+
+# Transform data to calculate percentages per tumor type
+QC_success_rate2 <- as.data.frame(table(QC_success_rate$tumour_type, QC_success_rate$status2))
+QC_success_rate2 <- QC_success_rate2[QC_success_rate2$Freq > 0,]
+colnames(QC_success_rate2) <- c("tumour_type", "status", "samples")
+
+# Calculate percentages for each status within tumor type
+QC_success_rate2 <- QC_success_rate2 %>% 
+  dplyr::group_by(tumour_type) %>% 
+  dplyr::mutate(perc = (samples/sum(samples) * 100))
+
+# Order status categories for stacking
+QC_success_rate2 <- QC_success_rate2 %>% 
+  arrange(match(status, c("QC Passed", "Failed_freeze-thaw-QC", "Failed")))
+
+# Calculate label positions for displaying counts
+QC_success_rate2 <- QC_success_rate2 %>%
+  dplyr::group_by(tumour_type) %>%
+  plyr::ddply("tumour_type", transform, label_ypos=(cumsum(perc) - 0.5*perc)/100)
+
+# Define color scheme for QC status
+mycolors_status <- c("Failed_freeze-thaw-QC" = "grey80", 
+                     "Failed" = "tomato", 
+                     "QC Passed" = "steelblue2")
+
+# Create stacked bar plot
+ggplot(QC_success_rate2, aes(x=tumour_type, y = samples, fill = reorder(status, -label_ypos))) +
+  geom_bar(width = 0.7, stat = "identity", color = 'black', linewidth = 0.1, position = "fill") +
+  geom_text(aes(y=label_ypos, label=samples), vjust=0.5, color="black", size=1.75) +
+  scale_x_discrete(position = "bottom", 
+                   limits = c("Gastric", "Pancreatic", "Ovarian", "Oesophageal", "Colorectal")) +
+  scale_y_continuous(expand=c(0,0)) +
+  scale_fill_manual(values = mycolors_status) +
+  coord_flip() + 
+  labs(x = NULL, y = NULL) +
+  theme_classic(base_size = 14) +
+  common_ggplot2 +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5, vjust = 1),
+        axis.line.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        panel.border = element_blank(),
+        axis.line = element_line(linewidth = 0.2),
+        legend.position = "none")
+```
+
+## Panel c - Data availability across samples
+```{r}
+# Load availability data from supplementary table 2.1
+availability <- as.data.frame(fread('/path_to_folder/supplementary_table_2.1.csv'))
+availability$`used_in_ElHarouni,D et al.` <- NULL
+availability$overlap_DepMap <- NULL
+
+# Standardize ATCC availability labels
+availability[availability$ATCC == "Available",]$ATCC <- "Yes"
+availability[availability$ATCC == "Deposited",]$ATCC <- "No"
+
+# Create combined commercial availability column
+availability$commercially_available <- "No"
+availability[availability$ATCC == "Yes" | availability$Merck == "Yes",]$commercially_available <- "Yes"
+
+# Remove individual commercial columns after creating combined column
+availability$ATCC <- NULL
+availability$Merck <- NULL
+
+# Change primary tumour types to TCGA names
+availability$cancer_type <- "COAD/READ"
+availability[availability$primary_tumour_type == "Oesophageal",]$cancer_type <- "ESCA"
+availability[availability$primary_tumour_type == "Gastric",]$cancer_type <- "STAD"
+availability[availability$primary_tumour_type == "Ovarian",]$cancer_type <- "OV"
+availability[availability$primary_tumour_type == "Pancreatic",]$cancer_type <- "PAAD"
+
+availability$primary_tumour_type <- NULL
+
+# Store cancer type mapping for later use
+cancer_type <- unique(availability[,c("sample_ID", "sanger_ID", "cancer_type")])
+
+# Reshape data to long format for heatmap
+availability$cancer_type2 <- availability$cancer_type
+availability <- gather(availability, "feature", "value", 4:(ncol(availability)-1))
+
+# Calculate frequency of each feature
+availability <- availability %>% 
+  group_by(feature) %>% 
+  mutate(freq = sum(value == "Yes"))
+
+# Create feature labels with frequencies
+availability$feature2 <- paste(availability$feature, "(", availability$freq, ")", sep = "")
+
+# Define color palette
+mycolors_availability <- c("Yes" = "navy", "No" = "white", "NA" = "white", 
+                          "COAD/READ" = "turquoise4", "ESCA" = "chocolate3", 
+                          "OV" = "orchid1", "PAAD" = "gold", "STAD" = "darkolivegreen3")
+
+# Define feature order for plot
+ORDER_availability <- c("cancer_type(0)", "WGS_available(256)", "RNAseq_available(255)", 
+                        "tumor_available(171)", "CRISPR_available(164)", 
+                        "overlap_HCMI(133)", "commercially_available(183)")
+
+# Create heatmap
+ggplot(data = availability) +
+  geom_tile(aes(x=sample_ID, y=feature2, fill = as.factor(value)), 
+            alpha = 0.75, linewidth = 0.01)+
+  labs(x= NULL, y= NULL, fill= NULL) +
+  facet_grid(.~cancer_type2, scales = "free", space = "free") +
+  scale_fill_manual(values = mycolors_availability) + 
+  scale_y_discrete(limits=ORDER_availability, expand = c(0,0))+
+  common_ggplot2 +
+  theme(axis.text.x=element_blank(), 
+        axis.ticks.x = element_blank(),
+        legend.position = "none",
+        panel.spacing = unit(0.1, "lines"))
+```
+
+## Panel d - Clinical characteristics of organoid cohort
+```{r}
+# Load clinical data from supplementary table 2.2
+CD_ORG_COMMON <- as.data.frame(fread('/path_to_folder/supplementary_table_2.2.csv'))
+CD_ORG_COMMON <- CD_ORG_COMMON[!is.na(CD_ORG_COMMON$age_at_attendance),]
+
+# Standardize pathological stage information
+CD_ORG_COMMON$STAGE <- CD_ORG_COMMON$pTNM_pathological_stage
+CD_ORG_COMMON$STAGE <- as.character(CD_ORG_COMMON$STAGE)
+CD_ORG_COMMON$STAGE <- gsub("^\\s+", "", CD_ORG_COMMON$STAGE)  # Remove leading whitespace
+
+# Handle ovarian cancer FIGO staging
+CD_ORG_COMMON[CD_ORG_COMMON$primary_tumour_type == "Ovarian", ]$STAGE <- 
+  paste("Stage", CD_ORG_COMMON[CD_ORG_COMMON$primary_tumour_type == "Ovarian", ]$`FIGO _stage`, sep = " ")
+
+# Consolidate substages into main stages
+CD_ORG_COMMON$STAGE <- gsub("Stage I[A-C]", "Stage I", CD_ORG_COMMON$STAGE)
+CD_ORG_COMMON$STAGE <- gsub("Stage I[1-9]", "Stage I", CD_ORG_COMMON$STAGE)  # FIXED: was Stage II
+CD_ORG_COMMON$STAGE <- gsub("Stage II[A-C]", "Stage II", CD_ORG_COMMON$STAGE)
+CD_ORG_COMMON$STAGE <- gsub("Stage II[1-9]", "Stage II", CD_ORG_COMMON$STAGE)
+CD_ORG_COMMON$STAGE <- gsub("Stage III[A-C]", "Stage III", CD_ORG_COMMON$STAGE)
+CD_ORG_COMMON$STAGE <- gsub("Stage III[1-9]", "Stage III", CD_ORG_COMMON$STAGE)  # FIXED: was Stage II
+CD_ORG_COMMON$STAGE <- gsub("Stage IV[A-C]", "Stage IV", CD_ORG_COMMON$STAGE)
+CD_ORG_COMMON$STAGE <- gsub("Stage IV[1-9]", "Stage IV", CD_ORG_COMMON$STAGE)  # FIXED: was Stage II
+
+# Clean up whitespace and handle special cases
+CD_ORG_COMMON$STAGE <- gsub("^\\s+", "", CD_ORG_COMMON$STAGE)
+CD_ORG_COMMON$STAGE <- gsub("\\s+$", "", CD_ORG_COMMON$STAGE)
+CD_ORG_COMMON$STAGE <- gsub("Stage 0", "Stage I", CD_ORG_COMMON$STAGE)
+CD_ORG_COMMON$STAGE <- gsub("^Stage$", "Unknown", CD_ORG_COMMON$STAGE)
+CD_ORG_COMMON$STAGE <- gsub("^$", "Unknown", CD_ORG_COMMON$STAGE)
+
+# Classify as primary or metastasis based on sample ID
+CD_ORG_COMMON$primary_metastasis <- "Primary"
+CD_ORG_COMMON[grep("M_", CD_ORG_COMMON$sanger_ID),]$primary_metastasis <- "Metastasis"
+
+# Create age interval categories
+CD_ORG_COMMON$age_intervals <- ">= 80"
+CD_ORG_COMMON[CD_ORG_COMMON$age_at_attendance < 50,]$age_intervals <- "< 50"
+CD_ORG_COMMON[CD_ORG_COMMON$age_at_attendance >= 50 & 
+              CD_ORG_COMMON$age_at_attendance < 60,]$age_intervals <- "50-59"
+CD_ORG_COMMON[CD_ORG_COMMON$age_at_attendance >= 60 & 
+              CD_ORG_COMMON$age_at_attendance < 70,]$age_intervals <- "60-69"
+CD_ORG_COMMON[CD_ORG_COMMON$age_at_attendance >= 70 & 
+              CD_ORG_COMMON$age_at_attendance < 80,]$age_intervals <- "70-79"
+
+```
+
+```{r}
+### SEX DISTRIBUTION ###
+CD_ORG_COMMON_SEX <- CD_ORG_COMMON %>% 
+  dplyr::group_by(primary_tumour_type, sex) %>% 
+  dplyr::summarise(count = n(), .groups = 'drop') 
+
+CD_ORG_COMMON_SEX <- CD_ORG_COMMON_SEX %>%
+  dplyr::group_by(primary_tumour_type) %>%
+  dplyr::mutate(perc = count/sum(count)*100)
+
+CD_ORG_COMMON_SEX$primary_tumour_type <- factor(CD_ORG_COMMON_SEX$primary_tumour_type, 
+                                                levels = c("Colorectal", "Oesophageal", 
+                                                          "Ovarian", "Pancreatic", "Gastric"))
+
+mycolors_sex <- c("Female" = "lightskyblue1", "Male" = "skyblue4")
+
+ggplot(CD_ORG_COMMON_SEX, aes(x=primary_tumour_type, y = perc, fill = sex)) +
+  geom_bar(width = 0.7, stat = "identity", color = 'black', linewidth = 0.1, 
+           position = position_stack(reverse = TRUE)) +
+  coord_flip()+
+  scale_x_discrete(limits=rev) +
+  labs(x = NULL, y = NULL, fill = "Sex") +
+  scale_fill_manual(values = mycolors_sex) + 
+  theme_classic(base_size = 14) +
+  common_ggplot2 +
+  theme(strip.background = element_blank(),
+        axis.text.x = element_text(angle = 0, hjust = 0.5, vjust = 1),
+        panel.border = element_blank(),
+        axis.line = element_line(linewidth = 0.2),
+        axis.ticks.y = element_blank(),
+        axis.line.y = element_blank(),
+        legend.position = "none") +
+  guides(fill = guide_legend(nrow = 1))
+
+```
+
+```{r}
+### PATHOLOGICAL STAGE DISTRIBUTION ###
+CD_ORG_COMMON_STAGE <- CD_ORG_COMMON %>%
+  dplyr::group_by(primary_tumour_type, STAGE) %>%
+  dplyr::summarise(count = n(), .groups = 'drop')
+
+CD_ORG_COMMON_STAGE <- CD_ORG_COMMON_STAGE %>%
+  dplyr::group_by(primary_tumour_type) %>%
+  dplyr::mutate(perc = count/sum(count)*100)
+
+CD_ORG_COMMON_STAGE$primary_tumour_type <- factor(CD_ORG_COMMON_STAGE$primary_tumour_type, 
+                                                  levels = c("Colorectal", "Oesophageal", 
+                                                            "Ovarian", "Pancreatic", "Gastric"))
+
+mycolors_stage <- c("Stage I" = "darkolivegreen1", "Stage II" = "olivedrab3", 
+                   "Stage III" = "darkolivegreen4", "Stage IV" = "darkolivegreen", 
+                   "Unknown" = "grey70")
+
+ggplot(CD_ORG_COMMON_STAGE, aes(x=primary_tumour_type, y = perc, fill = STAGE)) +
+  geom_bar(width = 0.7, stat = "identity", color = 'black', linewidth = 0.1, 
+           position = position_stack(reverse = TRUE)) +
+  coord_flip()+
+  scale_x_discrete(limits=rev) +
+  labs(x = NULL, y = NULL, fill = "Pathological stage") +
+  scale_fill_manual(values = mycolors_stage) +
+  theme_classic(base_size = 14) +
+  common_ggplot2 +
+  theme(strip.background = element_blank(),
+        axis.text.x = element_text(angle = 0, hjust = 0.5, vjust = 1),
+        panel.border = element_blank(),
+        axis.line = element_line(linewidth = 0.2),
+        axis.ticks.y = element_blank(),
+        axis.line.y = element_blank(),
+        axis.text.y = element_blank(),
+        legend.position = "none") +
+  guides(fill = guide_legend(nrow = 1))
+```
+
+```{r}
+### PRIMARY VS METASTASIS CLASSIFICATION ###
+CD_ORG_COMMON_CLASS <- CD_ORG_COMMON %>% 
+  dplyr::group_by(primary_tumour_type, primary_metastasis) %>% 
+  dplyr::summarise(count = n(), .groups = 'drop') 
+
+CD_ORG_COMMON_CLASS <- CD_ORG_COMMON_CLASS %>%
+  dplyr::group_by(primary_tumour_type) %>%
+  dplyr::mutate(perc = count/sum(count)*100)
+
+CD_ORG_COMMON_CLASS$primary_tumour_type <- factor(CD_ORG_COMMON_CLASS$primary_tumour_type, 
+                                                  levels = c("Colorectal", "Oesophageal", 
+                                                            "Ovarian", "Pancreatic", "Gastric"))
+
+mycolors_classification <- c("Primary" = "rosybrown1", "Metastasis" = "rosybrown3")
+
+ggplot(CD_ORG_COMMON_CLASS, aes(x=primary_tumour_type, y = perc, fill = primary_metastasis)) +
+  geom_bar(width = 0.7, stat = "identity", color = 'black', linewidth = 0.1) +
+  coord_flip()+
+  scale_x_discrete(limits=rev, position = "top") +
+  labs(x = NULL, y = NULL, fill = "Tumour Classification") +
+  scale_fill_manual(values = mycolors_classification) + 
+  theme_classic(base_size = 14) +
+  common_ggplot2 +
+  theme(strip.background = element_blank(),
+        axis.text.x = element_text(angle = 0, hjust = 0.5, vjust = 1),
+        panel.border = element_blank(),
+        axis.line = element_line(linewidth = 0.2),
+        axis.ticks.y = element_blank(),
+        axis.line.y = element_blank(),
+        axis.text.y = element_blank(),
+        legend.position = "none") +
+  guides(fill = guide_legend(nrow = 1))
+```
+
+```{r}
+### TREATMENT HISTORY ###
+CD_ORG_COMMON_TREATMENT <- CD_ORG_COMMON
+CD_ORG_COMMON_TREATMENT$treatment <- CD_ORG_COMMON_TREATMENT$`Treatment types given`
+
+# Consolidate treatment categories
+CD_ORG_COMMON_TREATMENT$treatment <- gsub("Cytotoxic chemotherapy/Immunotherapy", 
+                                          "Others", CD_ORG_COMMON_TREATMENT$treatment)
+CD_ORG_COMMON_TREATMENT$treatment <- gsub("Hormonal", "Others", 
+                                          CD_ORG_COMMON_TREATMENT$treatment)
+CD_ORG_COMMON_TREATMENT$treatment <- gsub("^Targeted therapy", "Others", 
+                                          CD_ORG_COMMON_TREATMENT$treatment)
+
+CD_ORG_COMMON_TREATMENT <- CD_ORG_COMMON_TREATMENT %>% 
+  dplyr::group_by(primary_tumour_type, treatment) %>% 
+  dplyr::summarise(count = n(), .groups = 'drop')
+
+CD_ORG_COMMON_TREATMENT <- CD_ORG_COMMON_TREATMENT %>%
+  dplyr::group_by(primary_tumour_type) %>%
+  dplyr::mutate(perc = count/sum(count)*100)
+
+CD_ORG_COMMON_TREATMENT[CD_ORG_COMMON_TREATMENT$treatment == "",]$treatment <- "Not Treated"
+
+# Remove text in parentheses from treatment labels
+CD_ORG_COMMON_TREATMENT$treatment <- gsub("\\s*\\([^\\)]+\\)", "", 
+                                          CD_ORG_COMMON_TREATMENT$treatment)
+
+CD_ORG_COMMON_TREATMENT$primary_tumour_type <- factor(CD_ORG_COMMON_TREATMENT$primary_tumour_type, 
+                                                      levels = c("Colorectal", "Oesophageal", 
+                                                                "Ovarian", "Pancreatic", "Gastric"))
+CD_ORG_COMMON_TREATMENT$treatment <- factor(CD_ORG_COMMON_TREATMENT$treatment, 
+                                            levels = c("Cytotoxic chemotherapy", 
+                                                      "Cytotoxic chemotherapy/Targeted therapy", 
+                                                      "Others", "Not Treated"))
+
+mycolors_treatment <- c("Not Treated" = "wheat1", "Cytotoxic chemotherapy" = "khaki4", 
+                       "Cytotoxic chemotherapy/Targeted therapy" = "khaki3", 
+                       "Others" = "khaki2")
+
+ggplot(CD_ORG_COMMON_TREATMENT, aes(x=primary_tumour_type, y = perc, fill = treatment)) +
+  geom_bar(width = 0.7, stat = "identity", color = 'black', linewidth = 0.1, 
+           position = position_stack(reverse = TRUE)) +
+  coord_flip()+
+  scale_x_discrete(limits=rev) +
+  labs(x = NULL, y = NULL, fill = "Treatment") +
+  scale_fill_manual(values = mycolors_treatment) +
+  theme_classic(base_size = 14) +
+  common_ggplot2 +
+  theme(strip.background = element_blank(),
+        axis.text.x = element_text(angle = 0, hjust = 0.5, vjust = 1),
+        panel.border = element_blank(),
+        axis.line = element_line(linewidth = 0.2),
+        axis.ticks.y = element_blank(),
+        axis.line.y = element_blank(),
+        legend.position = "none") +
+  guides(fill = guide_legend(nrow = 2))
+```
+
+```{r}
+### SMOKING STATUS ###
+CD_ORG_COMMON_SMOKE <- CD_ORG_COMMON
+
+# Standardize smoking status categories
+CD_ORG_COMMON_SMOKE[CD_ORG_COMMON_SMOKE$smoking_status == "",]$smoking_status <- "Unknown"
+CD_ORG_COMMON_SMOKE[CD_ORG_COMMON_SMOKE$smoking_status == "Never smoked",]$smoking_status <- "Non-smoker"
+CD_ORG_COMMON_SMOKE[CD_ORG_COMMON_SMOKE$smoking_status == "Non-smoker - history unknown",]$smoking_status <- "Non-smoker"
+
+CD_ORG_COMMON_SMOKE <- CD_ORG_COMMON_SMOKE %>% 
+  dplyr::group_by(primary_tumour_type, smoking_status) %>% 
+  dplyr::summarise(count = n(), .groups = 'drop')
+
+CD_ORG_COMMON_SMOKE <- CD_ORG_COMMON_SMOKE %>%
+  dplyr::group_by(primary_tumour_type) %>%
+  dplyr::mutate(perc = count/sum(count)*100)
+
+CD_ORG_COMMON_SMOKE$primary_tumour_type <- factor(CD_ORG_COMMON_SMOKE$primary_tumour_type, 
+                                                  levels = c("Colorectal", "Oesophageal", 
+                                                            "Ovarian", "Pancreatic", "Gastric"))
+CD_ORG_COMMON_SMOKE$smoking_status <- factor(CD_ORG_COMMON_SMOKE$smoking_status, 
+                                             levels = c("Non-smoker", "Ex smoker", 
+                                                       "Current smoker", "Unknown"))
+
+mycolors_smoke <- c("Non-smoker" = "grey40", "Ex smoker" = "palevioletred3", 
+                   "Current smoker" = "palevioletred4", "Unknown" = "grey70")
+
+ggplot(CD_ORG_COMMON_SMOKE, aes(x=primary_tumour_type, y = perc, fill = smoking_status)) +
+  geom_bar(width = 0.7, stat = "identity", color = 'black', linewidth = 0.1, 
+           position = position_stack(reverse = TRUE)) +
+  coord_flip()+
+  scale_x_discrete(limits=rev) +
+  labs(x = NULL, y = NULL, fill = "Smoking status") +
+  scale_fill_manual(values = mycolors_smoke) + 
+  theme_classic(base_size = 14) +
+  common_ggplot2 +
+  theme(strip.background = element_blank(),
+        axis.text.x = element_text(angle = 0, hjust = 0.5, vjust = 1),
+        panel.border = element_blank(),
+        axis.line = element_line(linewidth = 0.2),
+        axis.ticks.y = element_blank(),
+        axis.line.y = element_blank(),
+        axis.text.y = element_blank(),
+        legend.position = "none") +
+  guides(fill = guide_legend(nrow = 1))
+```
+
+```{r}
+### AGE DISTRIBUTION ###
+CD_ORG_COMMON_AGE <- CD_ORG_COMMON %>% 
+  dplyr::group_by(primary_tumour_type, age_intervals) %>% 
+  dplyr::summarise(count = n(), .groups = 'drop')
+
+CD_ORG_COMMON_AGE <- CD_ORG_COMMON_AGE %>%
+  dplyr::group_by(primary_tumour_type) %>%
+  dplyr::mutate(perc = count/sum(count)*100)
+
+CD_ORG_COMMON_AGE$primary_tumour_type <- factor(CD_ORG_COMMON_AGE$primary_tumour_type, 
+                                                levels = c("Colorectal", "Oesophageal", 
+                                                          "Ovarian", "Pancreatic", "Gastric"))
+CD_ORG_COMMON_AGE$age_intervals <- factor(CD_ORG_COMMON_AGE$age_intervals, 
+                                          levels = c("< 50", "50-59", "60-69", "70-79", ">= 80"))
+
+mycolors_age <- c("< 50" = "goldenrod1", "50-59" = "goldenrod2", "60-69" = "goldenrod", 
+                 "70-79" = "goldenrod3", ">= 80" = "goldenrod4")
+
+ggplot(CD_ORG_COMMON_AGE, aes(x=primary_tumour_type, y = perc, fill = age_intervals)) +
+  geom_bar(width = 0.7, stat = "identity", color = 'black', linewidth = 0.1, 
+           position = position_stack(reverse = TRUE)) +
+  coord_flip()+
+  scale_x_discrete(limits=rev, position = "top") +
+  labs(x = NULL, y = NULL, fill = "Age") +
+  scale_fill_manual(values = mycolors_age) + 
+  theme_classic(base_size = 14) +
+  common_ggplot2 +
+  theme(strip.background = element_blank(),
+        axis.text.x = element_text(angle = 0, hjust = 0.5, vjust = 1),
+        panel.border = element_blank(),
+        axis.line = element_line(linewidth = 0.2),
+        axis.ticks.y = element_blank(),
+        axis.line.y = element_blank(),
+        axis.text.y = element_blank(),
+        legend.position = "none") +
+  guides(fill = guide_legend(nrow = 1))
+```
+
+
+# FIGURE 2 - Genomic characterization
+```{r}
+# Load genomic comparison data from supplementary table 3.1
+ALL_comparisons <- as.data.frame(fread('/path_to_folder/supplementary_table_3.1.csv'))
+ALL_comparisons <- ALL_comparisons[,c("sample_ID", "individual_ID", "msStatus", "model", 
+                                      "ploidy", "purity", "tmbPerMb", "svTumorMutationalBurden", 
+                                      "wholeGenomeDuplication", "chromothripsis", "hr_status", 
+                                      "focal_amplifical", "clonal_mutations", "clonal_mutation_perc")]
+
+# Exclude longitudinal organoid samples
+ALL_comparisons <- ALL_comparisons[-grep("organoid - longitudinal", ALL_comparisons$model),]
+
+# Load copy number correlation data from supplementary table 3.3
+CN_correlation <- as.data.frame(fread('/path_to_folder/supplementary_table_3.3.csv'))
+
+# Reshape data to compare tumor vs organoid for each sample
+ALL_comparisons2 <- pivot_wider(data = ALL_comparisons, 
+                                id_cols = c(sample_ID, individual_ID), 
+                                names_from = model, 
+                                values_from = c("msStatus","ploidy", "purity", "tmbPerMb", 
+                                               "svTumorMutationalBurden", "wholeGenomeDuplication", 
+                                               "chromothripsis", "focal_amplifical", "clonal_mutations", 
+                                               "clonal_mutation_perc"))
+ALL_comparisons2 <- ALL_comparisons2[complete.cases(ALL_comparisons2),]
+
+# Calculate differences between organoid and tumor
+ALL_comparisons2$diff_ploidy <- ALL_comparisons2$ploidy_organoid - ALL_comparisons2$ploidy_tumour
+ALL_comparisons2$diff_TMB <- ALL_comparisons2$tmbPerMb_organoid - ALL_comparisons2$tmbPerMb_tumour
+ALL_comparisons2$diff_SVMB <- ALL_comparisons2$svTumorMutationalBurden_organoid - 
+                               ALL_comparisons2$svTumorMutationalBurden_tumour
+
+# Categorize whole genome duplication status
+ALL_comparisons2$comparison_WGD <- "None"
+ALL_comparisons2[ALL_comparisons2$wholeGenomeDuplication_organoid == "TRUE" & 
+                 ALL_comparisons2$wholeGenomeDuplication_tumour == "TRUE",]$comparison_WGD <- "Shared"
+ALL_comparisons2[ALL_comparisons2$wholeGenomeDuplication_organoid == "TRUE" & 
+                 ALL_comparisons2$wholeGenomeDuplication_tumour == "FALSE",]$comparison_WGD <- "Only Organoid"
+ALL_comparisons2[ALL_comparisons2$wholeGenomeDuplication_organoid == "FALSE" & 
+                 ALL_comparisons2$wholeGenomeDuplication_tumour == "TRUE",]$comparison_WGD <- "Only Tumour"
+
+# Categorize chromothripsis status
+ALL_comparisons2$comparison_chromothripsis <- "None"
+ALL_comparisons2[ALL_comparisons2$chromothripsis_organoid %in% c("Yes - complex", "Yes - canonical") & 
+                 ALL_comparisons2$chromothripsis_tumour %in% c("Yes - complex", "Yes - canonical"),]$comparison_chromothripsis <- "Shared"
+ALL_comparisons2[ALL_comparisons2$chromothripsis_organoid %in% c("Yes - complex", "Yes - canonical") & 
+                 ALL_comparisons2$chromothripsis_tumour == "No",]$comparison_chromothripsis <- "Only Organoid"
+ALL_comparisons2[ALL_comparisons2$chromothripsis_organoid == "No" & 
+                 ALL_comparisons2$chromothripsis_tumour %in% c("Yes - complex", "Yes - canonical"),]$comparison_chromothripsis <- "Only Tumour"
+
+# Merge with copy number correlation data and cancer type
+TABLE <- merge(ALL_comparisons2, CN_correlation, by = "sample_ID", all = T)
+TABLE <- merge(TABLE, cancer_type, by = "sample_ID")
+
+# Separate MSS and MSI colorectal cancers
+TABLE[TABLE$cancer_type == "COAD/READ",]$cancer_type <- 
+  paste(TABLE[TABLE$cancer_type == "COAD/READ",]$cancer_type, 
+        TABLE[TABLE$cancer_type == "COAD/READ",]$msStatus_organoid, sep = " - ")
+```
+
+## Panel a - Mutational burden correlation
+```{r}
+# Calculate Pearson correlation for mutational burden
+CORR_MUT <- cor.test(TABLE$tmbPerMb_organoid, TABLE$tmbPerMb_tumour, method = "pearson")
+
+# Define cancer type color palette
+mycolors_cancer <- c("COAD/READ - MSS" = "turquoise4", "COAD/READ - MSI" = "turquoise2", 
+                     "ESCA" = "chocolate3", "OV" = "orchid1", 
+                     "PAAD" = "gold", "STAD" = "darkolivegreen3")
+
+# Full range plot
+ggplot(TABLE, aes(x=tmbPerMb_organoid, y=tmbPerMb_tumour)) + 
+  geom_point(aes(color = cancer_type), alpha = 0.5, size = 1) +
+  geom_smooth(method = "lm", se = F, color = "black", linetype = "dashed", 
+              linewidth = 0.5, alpha = 0.5) +
+  scale_color_manual(values = mycolors_cancer) +
+  geom_text(x = 25, y = 410, 
+            label = paste("PCC = ", round(CORR_MUT$estimate, digits = 3), sep=""), size = 2) +
+  geom_text(x = 25, y = 400, 
+            label = paste("P = ", round(CORR_MUT$p.value, digits = 3), sep=""), size = 2) +
+  scale_y_continuous(limits = c(0,450), 
+                     breaks = c(0, 50, 100, 150, 200, 250, 300, 350, 400, 450)) +
+  scale_x_continuous(limits = c(0,450), 
+                     breaks = c(0, 50, 100, 150, 200, 250, 300, 350, 400, 450)) +
+  labs(x = "Mutational Load - Organoids", y = "Mutational Load - Tumours") +  # FIXED typo
+  common_ggplot2 +
+  theme(axis.text.x=element_text(angle = 0, vjust = 1, hjust = 0.5),
+        legend.position = "none",
+        strip.text.y = element_text(size = 6),
+        strip.text.x = element_text(size = 6))
+
+# Zoomed-in plot (excluding MSI samples)
+ggplot(TABLE[TABLE$tmbPerMb_organoid < 27,], aes(x=tmbPerMb_organoid, y=tmbPerMb_tumour)) + 
+  geom_point(aes(color = cancer_type), alpha = 0.5, size = 1) +
+  geom_smooth(method = "lm", se = F, color = "black", linetype = "dashed", 
+              linewidth = 0.5, alpha = 0.5) +
+  scale_color_manual(values = mycolors_cancer) +
+  scale_y_continuous(limits = c(0,27), breaks = c(0, 5, 10, 15, 20, 25)) +
+  scale_x_continuous(limits = c(0,27), breaks = c(0, 5, 10, 15, 20, 25)) +
+  labs(x = "Mutational Load - Organoids", y = "Mutational Load - Tumours") +
+  common_ggplot2 +
+  theme(axis.text.x=element_text(angle = 0, vjust = 1, hjust = 0.5),
+        legend.position = "none",
+        strip.text.y = element_text(size = 6),
+        strip.text.x = element_text(size = 6))
+```
+
+## Panel b - Structural variant burden correlation
+```{r}
+# Calculate Pearson correlation for structural variants
+CORR_SV <- cor.test(TABLE$svTumorMutationalBurden_organoid, 
+                    TABLE$svTumorMutationalBurden_tumour, method = "pearson")
+
+ggplot(TABLE, aes(x=svTumorMutationalBurden_organoid, y=svTumorMutationalBurden_tumour)) + 
+  geom_point(aes(color = cancer_type), alpha = 0.5, size = 1) +
+  geom_smooth(method = "lm", se = F, color = "black", linetype = "dashed", 
+              linewidth = 0.5, alpha = 0.5) +
+  scale_color_manual(values = mycolors_cancer) +
+  geom_text(x = 25, y = 1250, 
+            label = paste("PCC = ", round(CORR_SV$estimate, digits = 3), sep=""), size = 2) +
+  geom_text(x = 25, y = 1200, 
+            label = paste("P = ", round(CORR_SV$p.value, digits = 3), sep=""), size = 2) +
+  scale_y_continuous(limits = c(0,1300), 
+                     breaks = seq(0, 1300, 100)) +
+  scale_x_continuous(limits = c(0,1300), 
+                     breaks = seq(0, 1300, 100)) +
+  labs(x = "Number of SVs - Organoids", y = "Number of SVs - Tumours") +
+  common_ggplot2 +
+  theme(axis.text.x=element_text(angle = 0, vjust = 1, hjust = 0.5),
+        legend.position = "none",
+        strip.text.y = element_text(size = 6),
+        strip.text.x = element_text(size = 6))
+```
+
+## Panel c - Clonal mutation percentage correlation
+```{r}
+# Calculate Pearson correlation for clonal mutations
+CORR_clonal <- cor.test(TABLE$clonal_mutations_organoid, 
+                        TABLE$clonal_mutations_tumour, method = "pearson")
+
+ggplot(TABLE, aes(x=clonal_mutation_perc_organoid, y=clonal_mutation_perc_tumour)) + 
+  geom_point(aes(color = cancer_type), alpha = 0.5, size = 1) +
+  geom_smooth(method = "lm", se = F, color = "black", linetype = "dashed", 
+              linewidth = 0.5, alpha = 0.5) +
+  scale_color_manual(values = mycolors_cancer) +
+  geom_text(x = 10, y = 95, 
+            label = paste("PCC = ", round(CORR_clonal$estimate, digits = 3), sep=""), size = 2) +
+  geom_text(x = 10, y = 90, 
+            label = paste("P = ", round(CORR_clonal$p.value, digits = 3), sep=""), size = 2) +
+  scale_y_continuous(limits = c(0,100), breaks = c(0,25,50,75,100)) +
+  scale_x_continuous(limits = c(0,100), breaks = c(0,25,50,75,100)) +
+  labs(x = "Clonal mutations (%) - Organoids", y = "Clonal mutations (%) - Tumours") +
+  common_ggplot2 +
+  theme(axis.text.x=element_text(angle = 0, vjust = 1, hjust = 0.5),
+        strip.text.y = element_text(size = 6),
+        strip.text.x = element_text(size = 6),
+        legend.position = "none")
+```
+
+## Panel d - Jaccard index for shared variants
+```{r}
+# Load variant sharing data from supplementary table 3.2
+jaccard_index <- as.data.frame(fread('/path_to_folder/supplementary_table_3.2.csv'))
+
+# Exclude longitudinal samples
+jaccard_index <- jaccard_index[-grep("organoid - longitudinal", jaccard_index$model1),]
+jaccard_index <- jaccard_index[-grep("organoid - longitudinal", jaccard_index$model2),]
+
+# Filter for tumor-organoid comparisons from same individual
+jaccard_index <- jaccard_index[(jaccard_index$model1 == "organoid" & 
+                                jaccard_index$model2 == "tumour"),]
+jaccard_index <- jaccard_index[jaccard_index$sample1 == jaccard_index$sample2,]
+
+# Clean up columns
+jaccard_index$model1 <- NULL
+jaccard_index$sample2 <- NULL
+jaccard_index$model2 <- NULL
+colnames(jaccard_index)[2] <- "sample_ID"
+
+# Reshape to long format for plotting
+jaccard_index2 <- gather(jaccard_index, "type", "proportion", 3:5)
+
+# Merge with cancer type information
+cancer_type2 <- unique(TABLE[,c("sample_ID", "cancer_type")])
+jaccard_index2 <- merge(cancer_type2, jaccard_index2, by = "sample_ID")
+
+# Set factor levels for proper ordering
+jaccard_index2$type <- factor(jaccard_index2$type, 
+                              levels = c("PROP_ONLY_model2", "PROP_ONLY_model1", "PROP_SHARED"))
+jaccard_index2$sample_ID <- factor(jaccard_index2$sample_ID, 
+                                   levels = jaccard_index[order(jaccard_index$PROP_SHARED, 
+                                                                decreasing = T),]$sample_ID)
+
+# Define order for cancer types (used in subsequent plots)
+ORDER_cancer <- c("COAD/READ - MSS", "COAD/READ - MSI", "ESCA", "OV", "PAAD")
+jaccard_index2$cancer_type <- factor(jaccard_index2$cancer_type, levels = ORDER_cancer)
+
+# Define colors for shared vs unique variants
+mycolors_shared <- c("PROP_SHARED" = "#B8559B", 
+                     "PROP_ONLY_model2" = "navy", 
+                     "PROP_ONLY_model1" = "lightsteelblue")
+
+ggplot(data=jaccard_index2, aes(x=sample_ID, y=proportion, fill=type)) +
+  geom_bar(stat="identity") +
+  facet_grid(.~cancer_type, space = "free", scales = "free") +
+  scale_fill_manual(values = mycolors_shared) +
+  scale_y_continuous(expand = c(0,0)) +
+  labs(x = NULL, y = "Proportion of models", 
+       fill = "Presence of Chromosomal Rearrangements") +
+  common_ggplot2 +
+  theme(legend.position = "none",
+        strip.text.y = element_text(size = 6),
+        strip.text.x = element_text(size = 6),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank())
+```
+
+## Panel e - Copy number correlation by cancer type
+```{r}
+# Plot copy number correlation excluding gastric cancer
+ggplot(TABLE[!TABLE$cancer_type == "STAD",], aes(x=cancer_type, y=PCC_copyNumber, color = cancer_type)) + 
+  geom_boxplot(color = "black", outlier.shape = NA, lwd=0.1, width = 0.5) +
+  geom_jitter(position=position_jitter(0.2), alpha = 0.6, size = 0.1) +
+  geom_hline(aes(yintercept = mean(TABLE$PCC_copyNumber, na.rm = T)), 
+             colour = "red", linetype = "dashed") + 
+  coord_flip() +
+  scale_color_manual(values = mycolors_cancer) +
+  scale_x_discrete(limits=rev(ORDER_cancer)) +
+  labs(x = NULL, y = "CN correlation") +
+  common_ggplot2 +
+  theme(axis.text.x=element_text(angle = 0, vjust = 1, hjust = 0.5),
+        legend.position = "none")
+```
+
+
+# FIGURE 3 - Organoid genomic summary
+```{r}
+# Extract organoid-only data
+ORG_summary <- ALL_comparisons[ALL_comparisons$model == "organoid",]
+ORG_summary <- merge(ORG_summary, cancer_type, by = "sample_ID")
+ORG_summary$cancer_type2 <- ORG_summary$cancer_type
+
+# Separate MSS and MSI colorectal cancers
+ORG_summary[ORG_summary$cancer_type == "COAD/READ",]$cancer_type2 <- 
+  paste(ORG_summary[ORG_summary$cancer_type == "COAD/READ",]$cancer_type, 
+        ORG_summary[ORG_summary$cancer_type == "COAD/READ",]$msStatus, sep = " - ")
+
+# Store cancer type mapping for organoids
+ORG_cancer_type <- ORG_summary[,c("sample_ID", "cancer_type2")]
+```
+
+## Panel a - Distribution of genomic features by cancer type
+```{r}
+### PURITY ###
+ggplot(ORG_summary, aes(x=cancer_type2, y=purity, color = cancer_type2)) + 
+  geom_boxplot(color = "black", outlier.shape = NA, lwd=0.1, width = 0.5) +
+  geom_jitter(position=position_jitter(0.2), alpha = 0.6, size = 0.1) +
+  coord_flip() +
+  scale_color_manual(values = mycolors_cancer) +
+  scale_x_discrete(limits=rev(ORDER_cancer)) +
+  labs(x = NULL, y = "Purity") +
+  common_ggplot2 +
+  theme(axis.text.x=element_text(angle = 0, vjust = 1, hjust = 0.5),
+        legend.position = "none")
+```
+
+```{r}
+### PLOIDY ###
+ggplot(ORG_summary, aes(x=cancer_type2, y=ploidy, color = cancer_type2)) + 
+  geom_boxplot(color = "black", outlier.shape = NA, lwd=0.1, width = 0.5) +
+  geom_jitter(position=position_jitter(0.2), alpha = 0.6, size = 0.1) +
+  coord_flip() +
+  scale_color_manual(values = mycolors_cancer) +
+  scale_x_discrete(limits=rev(ORDER_cancer)) +
+  labs(x = NULL, y = "Ploidy") +
+  common_ggplot2 +
+  theme(axis.text.x=element_text(angle = 0, vjust = 1, hjust = 0.5),
+        legend.position = "none")
+```
+
+```{r}
+### MUTATIONAL LOAD ###
+ggplot(ORG_summary, aes(x=cancer_type2, y=tmbPerMb, color = cancer_type2)) + 
+  geom_boxplot(color = "black", outlier.shape = NA, lwd=0.1, width = 0.5) +
+  geom_jitter(position=position_jitter(0.2), alpha = 0.6, size = 0.1) +
+  coord_flip() +
+  scale_color_manual(values = mycolors_cancer) +
+  scale_x_discrete(limits=rev(ORDER_cancer)) +
+  labs(x = NULL, y = "Mutational load") +
+  common_ggplot2 +
+  theme(axis.text.x=element_text(angle = 0, vjust = 1, hjust = 0.5),
+        legend.position = "none")
+```
+
+```{r}
+### STRUCTURAL VARIANT BURDEN ###
+ggplot(ORG_summary, aes(x=cancer_type2, y=svTumorMutationalBurden, color = cancer_type2)) + 
+  geom_boxplot(color = "black", outlier.shape = NA, lwd=0.1, width = 0.5) +
+  geom_jitter(position=position_jitter(0.2), alpha = 0.6, size = 0.1) +
+  coord_flip() +
+  scale_color_manual(values = mycolors_cancer) +
+  scale_x_discrete(limits=rev(ORDER_cancer)) +
+  labs(x = NULL, y = "No. of SVs") +
+  common_ggplot2 +
+  theme(axis.text.x=element_text(angle = 0, vjust = 1, hjust = 0.5),
+        legend.position = "none")
+```
+
+```{r}
+### CLONAL FRACTION ###
+ggplot(ORG_summary, aes(x=cancer_type2, y=clonal_mutation_perc, color = cancer_type2)) + 
+  geom_boxplot(color = "black", outlier.shape = NA, lwd=0.1, width = 0.5) +
+  geom_jitter(position=position_jitter(0.2), alpha = 0.6, size = 0.1) +
+  coord_flip() +
+  scale_color_manual(values = mycolors_cancer) +
+  scale_x_discrete(limits=rev(ORDER_cancer)) +
+  labs(x = NULL, y = "Clonal mutations (%)") +
+  common_ggplot2 +
+  theme(axis.text.x=element_text(angle = 0, vjust = 1, hjust = 0.5),
+        legend.position = "none")
+```
+
+## Panel b - Cancer driver gene alterations
+```{r}
+# Load driver event data from supplementary table 3.4
+ALL_driver_events <- as.data.frame(fread('/path_to_folder/supplementary_table_3.4.csv'))
+
+# Load cancer driver gene annotations
+cancer_driver_genes <- as.data.frame(fread('/path_to_folder/cancer_driver_genes.tsv'))
+
+# Filter for organoid samples only
+ALL_driver_events <- ALL_driver_events[ALL_driver_events$model == "organoid",]
+
+# Create complete sample-gene matrix
+GENES <- unique(as.data.frame(ALL_driver_events[,"gene"]))
+colnames(GENES) <- "gene"
+
+SAMPLES <- unique(as.data.frame(ALL_driver_events[,"sample_ID"]))
+colnames(SAMPLES)[1] <- "sample_ID"
+
+SAMPLES_GENES <- tidyr::crossing(SAMPLES, GENES)
+
+# Merge with actual events
+ALL_driver_events <- merge(SAMPLES_GENES, ALL_driver_events, 
+                           by = c("sample_ID", "gene"), all.x = T)
+ALL_driver_events <- merge(ALL_driver_events, ORG_cancer_type, by = "sample_ID")
+
+ALL_driver_events <- ALL_driver_events[,c("sample_ID", "gene", "Genomic_alterations", 
+                                          "biallelic_corrected", "CPV", "variant", 
+                                          "cancer_type2")]
+
+# Fill in neutral status for genes without alterations
+ALL_driver_events[is.na(ALL_driver_events$Genomic_alterations),]$Genomic_alterations <- "Neutral"
+
+# Standardize alteration categories
+ALL_driver_events <- ALL_driver_events %>% 
+  dplyr::mutate(Genomic_alterations = case_when(
+    Genomic_alterations == "AMP" ~ "Amplification",
+    Genomic_alterations == "DEL" ~ "Large deletion",
+    Genomic_alterations == "HOM_DISRUPTION" ~ "SV",
+    Genomic_alterations == "PARTIAL_AMP" ~ "Amplification",
+    .default = Genomic_alterations))
+
+# Order alterations for plotting
+ALL_driver_events <- ALL_driver_events %>% 
+  arrange(factor(Genomic_alterations, 
+                levels = c("nonsense", "missense", "frameshift", "inframe", 
+                          "ess_splice", "stop_lost", "Amplification", 
+                          "Large deletion", "SV", "Neutral")))
+
+# Calculate position shifts for multiple alterations in same gene
+A <- ALL_driver_events %>% 
+  dplyr::group_by(sample_ID, gene) %>% 
+  dplyr::mutate(shift = (1:(length(Genomic_alterations)))/length(Genomic_alterations) - 
+                        1/(2 * length(Genomic_alterations)) - 1/2)
+B <- ALL_driver_events %>% 
+  dplyr::group_by(sample_ID, gene) %>% 
+  dplyr::mutate(height = 1/(length(Genomic_alterations)))
+
+ALL_driver_events <- merge(ALL_driver_events, A)
+ALL_driver_events <- merge(ALL_driver_events, B)
+ALL_driver_events$height <- as.numeric(ALL_driver_events$height)
+
+# Separate by cancer type
+ALL_driver_events_COLO_MSS <- ALL_driver_events[ALL_driver_events$cancer_type2 == "COAD/READ - MSS",]
+ALL_driver_events_COLO_MSI <- ALL_driver_events[ALL_driver_events$cancer_type2 == "COAD/READ - MSI",]
+ALL_driver_events_OESO <- ALL_driver_events[ALL_driver_events$cancer_type2 == "ESCA",]
+ALL_driver_events_OVAR <- ALL_driver_events[ALL_driver_events$cancer_type2 == "OV",]
+ALL_driver_events_PANC <- ALL_driver_events[ALL_driver_events$cancer_type2 == "PAAD",]
+ALL_driver_events_GAST <- ALL_driver_events[ALL_driver_events$cancer_type2 == "STAD",]
+
+# Helper function to process gene counts for each cancer type
+process_gene_counts <- function(driver_events_subset, cancer_type_subset, n_samples) {
+  # Count alterations per gene
+  gene_count <- driver_events_subset %>% 
+    group_by(gene) %>%
+    dplyr::summarise(COUNT1 = sum(Genomic_alterations != 'Neutral'),
+                     COUNT2 = sum(Genomic_alterations %in% c("nonsense", "missense", 
+                                                             "frameshift", "inframe", 
+                                                             "ess_splice", "stop_lost")),
+                     COUNT3 = sum(Genomic_alterations %in% c("Amplification", 
+                                                             "Large deletion", "SV")),
+                     .groups = 'drop')
+  
+  # Process alteration types
+  gene_count2 <- unique(driver_events_subset[,c("sample_ID", "gene", "Genomic_alterations", 
+                                                "biallelic_corrected")])
+  gene_count2 <- gene_count2[!gene_count2$Genomic_alterations == "Neutral",]
+  gene_count2$Genomic_alterations2 <- gene_count2$Genomic_alterations
+  
+  # Group mutation types
+  gene_count2[gene_count2$Genomic_alterations %in% c("nonsense", "frameshift", 
+                                                     "ess_splice", "stop_lost", 
+                                                     "missense", "inframe"),]$Genomic_alterations2 <- "Mutations"
+  
+  gene_count2$Genomic_alterations2 <- factor(gene_count2$Genomic_alterations2, 
+                                             levels = c("Amplification", "Large deletion", 
+                                                       "SV", "Mutations"))
+  gene_count2 <- gene_count2[order(gene_count2$Genomic_alterations2),]
+  
+  # Remove monoallelic LoF events
+  gene_count2 <- gene_count2[!(gene_count2$gene %in% 
+                              cancer_driver_genes[cancer_driver_genes$method_of_action == "LoF",]$gene & 
+                              gene_count2$biallelic_corrected == "No"),]
+  
+  # Combine alterations per sample/gene
+  gene_count2 <- gene_count2 %>% 
+    dplyr::group_by(sample_ID, gene) %>% 
+    dplyr::mutate(Genomic_alterations3 = paste0(Genomic_alterations2, collapse = "/"))
+  
+  gene_count2 <- unique(gene_count2[,c("sample_ID", "gene", "Genomic_alterations3")])
+  
+  # Simplify combined alterations
+  gene_count2[gene_count2$Genomic_alterations3 == "Large deletion/LoF mutations",]$Genomic_alterations3 <- "Large deletion"
+  gene_count2[gene_count2$Genomic_alterations3 == "Large deletion/GoF mutations",]$Genomic_alterations3 <- "Large deletion"
+  gene_count2[gene_count2$Genomic_alterations3 == "Mutations/Mutations",]$Genomic_alterations3 <- "Mutations"
+  
+  # Calculate frequencies and percentages
+  gene_count2 <- as.data.frame(table(gene_count2$gene, gene_count2$Genomic_alterations3))
+  gene_count2 <- gene_count2[!gene_count2$Freq == 0,]
+  gene_count2$perc <- gene_count2$Freq * 100 / n_samples
+  colnames(gene_count2)[1] <- "gene"
+  
+  return(gene_count2)
+}
+
+# Process each cancer type
+ORG_GENE_COUNT_COLO_MSS2 <- process_gene_counts(
+  ALL_driver_events_COLO_MSS, 
+  ORG_cancer_type[ORG_cancer_type$cancer_type2 == "COAD/READ - MSS",],
+  nrow(ORG_cancer_type[ORG_cancer_type$cancer_type2 == "COAD/READ - MSS",])
+)
+
+ORG_GENE_COUNT_COLO_MSI2 <- process_gene_counts(
+  ALL_driver_events_COLO_MSI,
+  ORG_cancer_type[ORG_cancer_type$cancer_type2 == "COAD/READ - MSI",],
+  nrow(ORG_cancer_type[ORG_cancer_type$cancer_type2 == "COAD/READ - MSI",])
+)
+
+ORG_GENE_COUNT_OESO2 <- process_gene_counts(
+  ALL_driver_events_OESO,
+  ORG_cancer_type[ORG_cancer_type$cancer_type2 == "ESCA",],
+  nrow(ORG_cancer_type[ORG_cancer_type$cancer_type2 == "ESCA",])
+)
+
+ORG_GENE_COUNT_OVAR2 <- process_gene_counts(
+  ALL_driver_events_OVAR,
+  ORG_cancer_type[ORG_cancer_type$cancer_type2 == "OV",],
+  nrow(ORG_cancer_type[ORG_cancer_type$cancer_type2 == "OV",])
+)
+
+ORG_GENE_COUNT_PANC2 <- process_gene_counts(
+  ALL_driver_events_PANC,
+  ORG_cancer_type[ORG_cancer_type$cancer_type2 == "PAAD",],
+  nrow(ORG_cancer_type[ORG_cancer_type$cancer_type2 == "PAAD",])
+)
+
+# Prepare genomic rearrangement summary
+ORG_summary$chromothripsis2 <- "No"
+ORG_summary[grep("Yes", ORG_summary$chromothripsis),]$chromothripsis2 <- "Yes"
+
+# Calculate WGD and chromothripsis frequencies by cancer type
+ORG_summary2 <- ORG_summary[!ORG_summary$cancer_type2 == "STAD",] %>% 
+  group_by(cancer_type2) %>% 
+  summarise(freq_WGD = sum(wholeGenomeDuplication == "TRUE"),
+            freq_chrom = sum(chromothripsis2 == "Yes"),
+            N = n(),
+            perc_WGD = freq_WGD/N*100,
+            perc_chrom = freq_chrom/N*100,
+            .groups = 'drop')
+
+ORG_summary2$freq_WGD <- NULL
+ORG_summary2$freq_chrom <- NULL
+ORG_summary2$N <- NULL
+ORG_summary2 <- gather(ORG_summary2, "feature", "value", 2:3)
+
+# Define colors for alteration types
+mycolors_alterations <- c("Amplification" = "red1", 
+                         "Large deletion" = "blue", 
+                         "SV" = "purple4", 
+                         "Amplification/Mutations" = "coral", 
+                         "Mutations" = "grey")
+```
+
+```{r}
+# Plot top 10 driver genes for COAD/READ - MSS
+SUM_COLO_MSS2 <- ORG_GENE_COUNT_COLO_MSS2 %>% group_by(gene) %>% summarise(SUM = sum(Freq))
+ORG_GENE_COUNT_COLO_MSS2$gene <- factor(ORG_GENE_COUNT_COLO_MSS2$gene, 
+                                         levels = SUM_COLO_MSS2[order(SUM_COLO_MSS2$SUM, 
+                                                                      decreasing = T),]$gene)
+
+ggplot(ORG_GENE_COUNT_COLO_MSS2[ORG_GENE_COUNT_COLO_MSS2$gene %in% 
+                                c("APC", "TP53", "KRAS", "PIK3CA", "FBXW7", 
+                                  "SMAD4", "SOX9", "AMER1", "PTEN", "BRAF"),], 
+       aes(fill=Var2, y=perc, x=gene)) + 
+  geom_bar(position="stack", stat="identity") +
+  scale_fill_manual(values = mycolors_alterations) +
+  scale_x_discrete(expand = c(0,0)) +
+  scale_y_continuous(limits = c(0,100), breaks = c(0,25,50,75,100), expand = c(0,0)) +
+  coord_flip() +
+  labs(y = NULL, x = NULL) +
+  common_ggplot2 +
+  theme(panel.spacing.y = unit(1, "points"),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        legend.position = "none")
+
+# Similar plots for other cancer types...
+# (Code truncated for brevity - follows same pattern)
+```
+
+```{r}
+# WGD and chromothripsis frequency plot
+ORG_summary2$cancer_type2 <- factor(ORG_summary2$cancer_type2, levels = ORDER_cancer)
+ggplot(ORG_summary2, aes(y=value, x=feature)) + 
+  geom_bar(position="stack", stat="identity") +
+  scale_x_discrete(expand = c(0,0)) +
+  scale_y_continuous(limits = c(0,100), breaks = c(0,25,50,75,100), expand = c(0,0)) +
+  facet_grid(.~cancer_type2, space = "free", scales = "free") +
+  coord_flip() +
+  labs(y ="Proportion of Models", x = NULL) +
+  common_ggplot2 +
+  theme(panel.spacing.y = unit(1, "points"),
+        axis.text.x = element_text(angle = 0, hjust = 0.5),
+        legend.position = "none")
+```
+
+
+# FIGURE 4 - CRISPR screening results
+## Panels a and b - Fitness gene distribution and LFC values
+```{r}
+# Load binary CRISPR data from supplementary table 5
+CRISPR_binary <- as.data.frame(fread('/path_to_folder/supplementary_table_5.csv'))
+
+# Load LFC CRISPR data from supplementary table 6
+CRISPR_LFC <- as.data.frame(fread('/path_to_folder/supplementary_table_6.csv'))
+
+# Merge datasets
+CRISPR_data <- merge(CRISPR_binary, CRISPR_LFC)
+CRISPR_data <- merge(CRISPR_data, cancer_type, by = "sample_ID")
+CRISPR_data$sample_library <- paste(CRISPR_data$sample_ID, CRISPR_data$library, sep = "-")
+
+# Calculate frequency of depleted genes per sample
+frequency_binary <- as.data.frame(table(CRISPR_data$sample_library, 
+                                       CRISPR_data$is_depleted, 
+                                       CRISPR_data$cancer_type))
+frequency_binary <- frequency_binary[frequency_binary$Var2 == 1,]
+frequency_binary <- frequency_binary[frequency_binary$Freq > 0,]
+colnames(frequency_binary)[1] <- "sample_library"
+
+# Define cancer type colors
+mycolors_cancer2 <- c("COAD/READ" = "turquoise4", "ESCA" = "chocolate3", 
+                     "OV" = "orchid1", "PAAD" = "gold", "STAD" = "darkolivegreen3")
+```
+
+```{r}
+# Panel a - Number of fitness genes per sample
+ggplot(frequency_binary, aes(x=reorder(sample_library, -Freq), y=Freq, fill = Var3)) + 
+  geom_bar(aes(color = Var3), stat = "identity", linewidth = 0.1, width = 0.5) +
+  geom_hline(yintercept = median(frequency_binary$Freq)) +
+  scale_fill_manual(values = mycolors_cancer2) +
+  scale_color_manual(values = mycolors_cancer2) +
+  scale_y_continuous(expand = c(0,0)) +
+  labs(x = NULL, y = "Num. of fitness genes") +
+  common_ggplot2 +
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x = element_blank(),
+        legend.position = "none")
+```
+
+```{r}
+# Panel b - LFC distribution across samples
+CRISPR_data$sample_library <- factor(CRISPR_data$sample_library, 
+                                     levels = frequency_binary[order(frequency_binary$Freq, 
+                                                                    decreasing = T),]$sample_library)
+
+ggplot(CRISPR_data, aes(x = sample_library, y = LFC)) +
+  ggrastr::rasterise(geom_jitter(aes(color = cancer_type), 
+                                position=position_jitter(0.2), 
+                                size = 0.1, alpha = 0.25), dpi = 300) +
+  geom_boxplot(alpha = 0, color = "white", lwd = 0.1, outlier.shape = NA) +
+  scale_color_manual(values = mycolors_cancer2) +
+  labs(x=NULL) +
+  common_ggplot2 +
+  theme(axis.text.x=element_blank(),
+        axis.ticks.x = element_blank(),
+        legend.position = "none")
+```
+
+## Panels c and d - AUROC and AUPR curves
+```{r}
+# Load ROC/PR curve values
+ROC_PR_values <- as.data.frame(fread('/path_to_folder/data_AUROC_AUPR_curves.csv'))
+
+# Load AUROC/AUPR summary statistics from supplementary table 4.1
+QC_CRISPR <- as.data.frame(fread('/path_to_folder/supplementary_table_4.1.csv'))
+
+# Parse sample ID and library from combined identifier
+ROC_PR_values <- separate(ROC_PR_values, sanger_ID_library, 
+                          into = c("sanger_ID", "library"), 
+                          sep = "\\.", remove = F)
+
+ROC_PR_values <- ROC_PR_values[complete.cases(ROC_PR_values$precision),]
+
+# Merge with cancer type
+ROC_PR_values <- merge(cancer_type, ROC_PR_values, by = "sanger_ID", all.y = T)
+
+# Create color mapping for samples
+sample_colors <- as.data.frame(unique(ROC_PR_values[,c("sanger_ID_library", "cancer_type")]))
+sample_colors$color <- "turquoise4"
+sample_colors[sample_colors$cancer_type == "ESCA",]$color <- "chocolate3"
+sample_colors[sample_colors$cancer_type == "OV",]$color <- "orchid1"
+sample_colors[sample_colors$cancer_type == "PAAD",]$color <- "gold"
+sample_colors[sample_colors$cancer_type == "STAD",]$color <- "darkolivegreen3"
+sample_colors$color <- factor(sample_colors$color, 
+                              levels = c("turquoise4", "chocolate3", "orchid1", 
+                                        "gold", "darkolivegreen3"))
+sample_colors2 <- setNames(as.character(sample_colors$color), 
+                          sample_colors$sanger_ID_library)
+```
+
+```{r}
+# Panel c - ROC curves
+ggplot(ROC_PR_values, aes(x = fpr, y = sensitivity)) + 
+  ggrastr::rasterise(geom_step(aes(color = sanger_ID_library)), dpi = 300) +
+  geom_segment(aes(x = 1, xend = 0, y = 1, yend = 0), 
+               color = "grey40", linetype = "dashed") +
+  scale_color_manual(values = sample_colors2) +
+  labs(x = "Specificity", y = "Sensitivity") +
+  ggtitle(paste("Median AUROC = ", round(median(QC_CRISPR$AUC_ROC), digits = 3), sep = "")) + 
+  common_ggplot2 +
+  theme_classic() +
+  theme(plot.title=element_text(hjust=0.5, vjust=0.5, face='bold', color = "grey40"),
+        legend.position = "none")
+```
+
+```{r}
+# Panel d - Precision-Recall curves
+ggplot(ROC_PR_values, aes(x = sensitivity, y = precision)) + 
+  ggrastr::rasterise(geom_step(aes(color = sanger_ID_library)), dpi = 300) +
+  geom_segment(aes(x = 1, xend = 0, y = 1, yend = 0), 
+               color = "grey40", linetype = "dashed") +
+  scale_color_manual(values = sample_colors2) +
+  labs(x = "Recall", y = "Precision") +
+  ggtitle(paste("Median AUPR = ", round(median(QC_CRISPR$AUC_PR), digits = 3), sep = "")) + 
+  common_ggplot2 +
+  theme_classic() +
+  theme(plot.title=element_text(hjust=0.5, vjust=0.5, face='bold', color = "grey40"),
+        legend.position = "none")
+```
+
+## Panel e - Genetic constraint analysis
+```{r}
+# Load differential dependency analysis results
+SUMMARY_filter <- as.data.frame(fread('/path_to_folder/supplementary_table_7.1.csv'))
+SUMMARY_COLO_filter <- as.data.frame(fread('/path_to_folder/supplementary_table_7.2.csv'))
+SUMMARY_OESO_filter <- as.data.frame(fread('/path_to_folder/supplementary_table_7.3.csv'))
+
+# Load gene classifications
+essential <- as.data.frame(fread('/path_to_folder/essential_genes_organoids_downsampling.csv'))
+non_essential <- as.data.frame(fread('/path_to_folder/non-essential_genes_organoids_downsampling.csv'))
+
+# Load pan-cancer core fitness genes from cell lines
+load('/path_to_folder/10_PANCANCER_coreFitness_genes.RData')
+PanCancerCoreFitnessGenes <- bitr(PanCancerCoreFitnessGenes, 
+                                  fromType="SYMBOL", toType="ENSEMBL", 
+                                  OrgDb="org.Hs.eg.db")
+
+# Load pan-cancer core fitness genes in organoids from supplementary table 4.2
+ORG_PanCancerCoreFitnessGenes <- as.data.frame(fread('/path_to_folder/supplementary_table_4.2.csv'))
+
+# Load Open Targets gene annotation
+OT_dataset <- as.data.frame(fread("/path_to_folder/open_targets_dataset.csv"))
+
+# Create genetic constraint buckets
+OT_dataset[is.na(OT_dataset$geneticConstraint),]$geneticConstraint <- 2
+OT_dataset$geneticConstraint_bucket <- "Very high constraint"
+OT_dataset[OT_dataset$geneticConstraint >= -0.66,]$geneticConstraint_bucket <- "High constraint"
+OT_dataset[OT_dataset$geneticConstraint >= -0.33,]$geneticConstraint_bucket <- "Medium constraint"
+OT_dataset[OT_dataset$geneticConstraint >= 0,]$geneticConstraint_bucket <- "Low constraint"
+OT_dataset[OT_dataset$geneticConstraint >= 0.33,]$geneticConstraint_bucket <- "Very low constraint"
+OT_dataset[OT_dataset$geneticConstraint == 2,]$geneticConstraint_bucket <- "NA"
+
+# Annotate genes with various classifications
+colnames(OT_dataset)[1] <- "ensembl_id"
+OT_dataset2 <- OT_dataset[OT_dataset$ensembl_id %in% CRISPR_data$ensembl_id,]
+OT_dataset2$essential <- ifelse(OT_dataset2$ensembl_id %in% essential$ensembl_id, "Yes", "No")
+OT_dataset2$non_essential <- ifelse(OT_dataset2$ensembl_id %in% non_essential$ensembl_id, "Yes", "No")
+OT_dataset2$core_ORG <- ifelse(OT_dataset2$ensembl_id %in% ORG_PanCancerCoreFitnessGenes$ENSEMBL_ID, "Yes", "No")
+OT_dataset2$core_CL <- ifelse(OT_dataset2$ensembl_id %in% PanCancerCoreFitnessGenes$ENSEMBL, "Yes", "No")
+OT_dataset2$diff_fitness_gastrointestinal <- ifelse(OT_dataset2$ensembl_id %in% SUMMARY_filter$ENSEMBL_ID, "Yes", "No")
+OT_dataset2$diff_fitness_COADREAD <- ifelse(OT_dataset2$ensembl_id %in% SUMMARY_COLO_filter$ENSEMBL_ID, "Yes", "No")
+OT_dataset2$diff_fitness_ESCA <- ifelse(OT_dataset2$ensembl_id %in% SUMMARY_OESO_filter$ENSEMBL_ID, "Yes", "No")
+
+# Calculate frequencies of genetic constraint categories
+OT_freq <- OT_dataset2[,c("ensembl_id", "geneticConstraint_bucket", "essential", 
+                          "non_essential", "core_ORG", "core_CL", 
+                          "diff_fitness_gastrointestinal", "diff_fitness_COADREAD", 
+                          "diff_fitness_ESCA")]
+OT_freq <- gather(OT_freq, "feature", "value", 3:ncol(OT_freq))
+
+OT_freq_GC <- as.data.frame(table(OT_freq$geneticConstraint_bucket, 
+                                  OT_freq$feature, OT_freq$value))
+OT_freq_GC <- OT_freq_GC[OT_freq_GC$Var3 == "Yes",]
+
+# Calculate percentages
+OT_freq_GC <- OT_freq_GC %>% 
+  dplyr::group_by(Var2) %>% 
+  dplyr::mutate(perc = (Freq/sum(Freq) * 100))
+
+OT_freq_GC <- OT_freq_GC %>% 
+  arrange(match(Var1, c("Very low constraint", "Low constraint", "Medium constraint", 
+                        "High constraint","Very high constraint", "NA")))
+
+OT_freq_GC <- OT_freq_GC %>%
+  dplyr::group_by(Var2) %>%
+  plyr::ddply("Var2", transform, label_ypos=(cumsum(perc)-0.5*perc)/100)
+
+# Set factor levels for plotting
+OT_freq_GC$Var1 <- factor(OT_freq_GC$Var1, 
+                           levels = c("NA", "Very high constraint", "High constraint", 
+                                     "Medium constraint", "Low constraint", "Very low constraint"))
+OT_freq_GC$Var2 <- factor(OT_freq_GC$Var2, 
+                           levels = c("essential", "non_essential", "core_CL", "core_ORG", 
+                                     "diff_fitness_gastrointestinal", "diff_fitness_COADREAD", 
+                                     "diff_fitness_ESCA"))
+
+# Define color scheme
+mycolors_OT <- c("Very high constraint" = "purple4", "High constraint" = "purple", 
+                "Medium constraint" = "orchid", "Low constraint" = "plum", 
+                "Very low constraint" = "thistle")
+
+# Plot genetic constraint distribution
+ggplot(OT_freq_GC, aes(x=Var2, y = perc, fill = Var1)) +
+  geom_bar(width = 0.7, stat = "identity", color = 'black', linewidth = 0.1, position = "fill") +
+  geom_text(aes(y=label_ypos, label=Freq), vjust=0.5, color="black", size=1.75) +
+  scale_y_continuous(expand=c(0,0)) +
+  scale_fill_manual(values = mycolors_OT) +
+  labs(x = NULL, y = NULL) +
+  theme_classic(base_size = 14) +
+  common_ggplot2 +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5, vjust = 1),
+        panel.border = element_blank(),
+        axis.line = element_line(linewidth = 0.2),
+        legend.position = "none")
+```
+
+## Panel f - Priority biomarkers and genetic constraint
+```{r}
+# Load priority biomarker scores from supplementary table 8.2
+priority_score_GAST <- as.data.frame(fread('/path_to_folder/supplementary_table_8.2.csv'))
+colnames(priority_score_GAST)[1] <- "gene"
+
+# Annotate with gene names and Open Targets data
+gene_names <- unique(CRISPR_binary[,c("gene", "ensembl_id")])
+OT_dataset <- merge(gene_names, OT_dataset, by = "ensembl_id")
+priority_score_GAST <- merge(priority_score_GAST, OT_dataset, by = "gene")
+
+# Statistical testing for genetic constraint effects
+stat.test <- priority_score_GAST[!priority_score_GAST$geneticConstraint_bucket == "NA",] %>% 
+  wilcox_test(MEAN_LFC ~ geneticConstraint_bucket, p.adjust.method = "fdr")
+stat.test <- stat.test[stat.test$p.adj < 0.05,]
+
+# Set factor levels
+priority_score_GAST$geneticConstraint_bucket <- factor(
+  priority_score_GAST$geneticConstraint_bucket, 
+  levels = c("NA", "Very high constraint", "High constraint", "Medium constraint", 
+            "Low constraint", "Very low constraint"))
+
+# Define biomarker class colors
+mycolors_biomarkers <- c("C" = "#F1BB7B", "B" = "#FD6467", "A" = "#5B1A18", "No" = "grey90")
+
+# Plot LFC by genetic constraint with biomarker highlighting
+ggplot(priority_score_GAST[!priority_score_GAST$geneticConstraint_bucket == "NA",], 
+       aes(x = geneticConstraint_bucket, y = MEAN_LFC))+
+  geom_boxplot(lwd = 0.2, outlier.shape = NA) +
+  geom_jitter(aes(color = biomarker_class, alpha = biomarker_class), 
+             position=position_jitter(0.1), size = 0.5) +
+  stat_pvalue_manual(stat.test, label = "P = {p}", vjust = -1, 
+                     y.position = c(0.25, 0.25, 0.55, 0.55, 0.4, 0.4, 0.7), 
+                     size=1, bracket.size = 0.2) +
+  scale_color_manual(values = mycolors_biomarkers) +
+  scale_alpha_manual(values = c("A" = 1, "B" = 1, "C" = 0.3, "No" = 0.1)) + 
+  labs(x = NULL, y = "mean gene LFC") +
+  common_ggplot2 +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5, vjust = 0),
+        legend.position = "none")
+```
+
+
+# FIGURE 5 - KRAS dependency analysis
+## Panel a - KRAS pathway dependencies in colorectal organoids
+```{r}
+# Remove duplicate samples based on QC (from supplementary table 5)
+CRISPR_LFC2 <- CRISPR_LFC
+duplicates_to_remove <- c(
+  "HCM-SANG-0267-D12_minLib", "HCM-SANG-0268-C18_v1_1", "HCM-SANG-0270-C20_minLib",
+  "HCM-SANG-0272-C20_v1_1", "HCM-SANG-0273-C18_minLib", "HCM-SANG-0276-C18_minLib",
+  "HCM-SANG-0282-C18_minLib", "HCM-SANG-0529-C18_v1_1", "HCM-SANG-0284-C18_minLib",
+  "HCM-SANG-0288-C18_v1_1", "WTSI-COLO_278_minLib", "WTSI-COLO_376_minLib",
+  "HCM-SANG-0291-C15_v1_1", "HCM-SANG-0299-C15-A_minLib", "HCM-SANG-0299-C15-B_minLib",
+  "HCM-SANG-0306-C15_minLib"
+)
+
+CRISPR_LFC2 <- CRISPR_LFC2[!(paste(CRISPR_LFC2$sample_ID, CRISPR_LFC2$library, sep="_") %in% 
+                             gsub("_", "_", duplicates_to_remove)),]
+
+# Annotate KRAS status
+KRAS_status <- ALL_driver_events[ALL_driver_events$gene == "KRAS",]
+KRAS_status <- KRAS_status[,c("sample_ID", "Genomic_alterations", "variant")]
+colnames(KRAS_status) <- c("sample_ID", "KRAS_status", "KRAS_variant")
+
+KRAS_status <- merge(SAMPLES, KRAS_status, by = "sample_ID", all.x = T)
+KRAS_status[is.na(KRAS_status$KRAS_variant),]$KRAS_variant <- "WT"
+KRAS_status[KRAS_status$KRAS_status == "Amplification",]$KRAS_variant <- "AMP"
+
+# Categorize KRAS variants
+KRAS_status$KRAS_variant2 <- "Other KRAS mut"
+KRAS_status[grep("WT", KRAS_status$KRAS_variant),]$KRAS_variant2 <- "KRAS wt"
+KRAS_status[grep("AMP", KRAS_status$KRAS_variant),]$KRAS_variant2 <- "KRAS amp"
+KRAS_status[grep("G12", KRAS_status$KRAS_variant),]$KRAS_variant2 <- "KRAS G12 mut"
+
+# Consolidate multiple alterations per sample
+KRAS_status <- KRAS_status %>% 
+  group_by(sample_ID) %>% 
+  summarise_all(funs(paste(na.omit(.), collapse = "/")))
+
+# Clean up combined annotations
+KRAS_status$KRAS_status <- gsub("AMP/|/AMP", "", KRAS_status$KRAS_status)
+KRAS_status$KRAS_variant <- gsub("AMP/|/AMP", "", KRAS_status$KRAS_variant)
+KRAS_status$KRAS_variant2 <- gsub("KRAS amp/|/KRAS amp", "", KRAS_status$KRAS_variant2)
+KRAS_status[grep("missense", KRAS_status$KRAS_status),]$KRAS_status <- "missense"
+KRAS_status[grep("Other KRAS mut", KRAS_status$KRAS_variant2),]$KRAS_variant2 <- "Other KRAS mut"
+
+# Annotate other pathway genes
+other_genes <- ALL_driver_events[ALL_driver_events$gene %in% 
+                                 c("BRAF", "HRAS", "ERBB2", "EGFR", "MAP2K1", "PTEN"),]
+other_genes <- unique(other_genes[,c("sample_ID", "gene", "Genomic_alterations")])
+other_genes$pathway_status <- paste(other_genes$gene, other_genes$Genomic_alterations, sep = "_")
+other_genes[other_genes$Genomic_alterations == "Neutral",]$pathway_status <- NA
+
+# Remove passenger PTEN missense variants
+other_genes <- other_genes[!other_genes$pathway_status == "PTEN_missense",]
+other_genes$gene <- NULL
+other_genes$Genomic_alterations <- NULL
+
+other_genes <- other_genes %>% 
+  group_by(sample_ID) %>% 
+  summarise_all(funs(paste(na.omit(.), collapse = "/")))
+
+other_genes <- merge(SAMPLES, other_genes, by = "sample_ID", all.x = T)
+other_genes[is.na(other_genes$pathway_status),]$pathway_status <- "WT"
+
+# Categorize pathway alterations
+other_genes$pathway_status2 <- "Other"
+other_genes[grep("MAP2K1_missense", other_genes$pathway_status),]$pathway_status2 <- "MAP2K1_mut"
+other_genes[grep("ERBB2_Amplification", other_genes$pathway_status),]$pathway_status2 <- "ERBB2_amp"
+other_genes[grep("EGFR_Amplification", other_genes$pathway_status),]$pathway_status2 <- "EGFR_amp"
+other_genes[grep("PTEN_Large deletion|PTEN_SV", other_genes$pathway_status),]$pathway_status2 <- "PTEN_del"
+other_genes[grep("BRAF", other_genes$pathway_status),]$pathway_status2 <- "BRAF_mut"
+other_genes[grep("WT", other_genes$pathway_status),]$pathway_status2 <- "wt"
+
+# Simplified BRAF classification
+other_genes$pathway_status3 <- "Other"
+other_genes[grep("BRAF", other_genes$pathway_status),]$pathway_status3 <- "BRAF_mut"
+other_genes[grep("WT", other_genes$pathway_status),]$pathway_status3 <- "wt"
+
+# Merge all annotations
+CRISPR_LFC_ann <- merge(CRISPR_LFC2, KRAS_status, by = "sample_ID")
+CRISPR_LFC_ann <- merge(CRISPR_LFC_ann, other_genes, by = "sample_ID")
+
+# Filter for colorectal models
+CRISPR_LFC_ann_COLO <- CRISPR_LFC_ann[CRISPR_LFC_ann$sample_ID %in% 
+                                      cancer_type[cancer_type$cancer_type == "COAD/READ",]$sample_ID,]
+
+# Set factor levels
+CRISPR_LFC_ann_COLO$KRAS_variant2 <- factor(CRISPR_LFC_ann_COLO$KRAS_variant2, 
+                                             levels = c("KRAS G12 mut", "Other KRAS mut","KRAS wt"))
+CRISPR_LFC_ann_COLO$gene <- factor(CRISPR_LFC_ann_COLO$gene, levels = c("KRAS", "EGFR", "PTPN11"))
+
+# Plot dependency by KRAS status (all samples)
+ggplot(CRISPR_LFC_ann_COLO[CRISPR_LFC_ann_COLO$gene %in% c("EGFR", "PTPN11", "KRAS"),], 
+       aes(x = KRAS_variant2, y = LFC))+
+  geom_boxplot(lwd = 0.2, outlier.shape = NA) +
+  geom_jitter(aes(color = pathway_status3), position=position_jitter(0.1), 
+             alpha = 0.5, size = 0.5) +
+  facet_grid(. ~ gene, space = "free", scales = "free") +
+  scale_color_manual(values = c("red", "orangered4", "black")) +
+  scale_y_continuous(limits = c(-3.5, 2.5)) +
+  labs(x = NULL, y = "LFC") +
+  common_ggplot2 +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+        strip.text.x = element_text(size = 6))
+
+# Plot dependency excluding BRAF mutants with KRAS WT
+ggplot(CRISPR_LFC_ann_COLO[CRISPR_LFC_ann_COLO$gene %in% c("EGFR", "PTPN11", "KRAS") & 
+                           !(CRISPR_LFC_ann_COLO$KRAS_status == "WT" & 
+                             CRISPR_LFC_ann_COLO$pathway_status3 == "BRAF_mut"),], 
+       aes(x = KRAS_variant2, y = LFC))+
+  geom_boxplot(lwd = 0.2, outlier.shape = NA) +
+  geom_jitter(position=position_jitter(0.1), alpha = 0.5, size = 0.5) +
+  facet_grid(. ~ gene, space = "free", scales = "free") +
+  scale_y_continuous(limits = c(-3.5, 2.5)) +
+  labs(x = NULL, y = "LFC") +
+  common_ggplot2 +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+        strip.text.x = element_text(size = 6))
+```
+
+## Panel b - Drug response by KRAS status
+```{r}
+# Load drug response data from supplementary table 9
+drugs <- as.data.frame(fread('/path_to_folder/supplementary_table_9.csv'))
+
+# Merge with KRAS status annotations
+drugs <- merge(drugs, KRAS_status, by = "sample_ID")
+
+# Set factor levels for KRAS variants
+drugs$KRAS_variant2 <- factor(drugs$KRAS_variant2, 
+                              levels = c("KRAS G12 mut", "Other KRAS mut", "KRAS wt"))
+
+# Create specific G12C and G12D categories
+drugs$KRAS_variant_G12C <- "Other KRAS mut"
+drugs[drugs$KRAS_variant == "G12C",]$KRAS_variant_G12C <- "KRAS G12C mut"
+drugs[drugs$KRAS_variant == "WT",]$KRAS_variant_G12C <- "KRAS wt"
+
+drugs$KRAS_variant_G12D <- "Other KRAS mut"
+drugs[drugs$KRAS_variant == "G12D",]$KRAS_variant_G12D <- "KRAS G12D mut"
+drugs[drugs$KRAS_variant == "WT",]$KRAS_variant_G12D <- "KRAS wt"
+
+# Statistical tests for drug responses
+stat.test.afatinib <- drugs %>% 
+  wilcox_test(Afatinib_uM ~ KRAS_variant2, p.adjust.method = "fdr")
+stat.test.afatinib <- stat.test.afatinib[stat.test.afatinib$p.adj < 0.05,]
+
+stat.test.gefitinib <- drugs %>% 
+  wilcox_test(Gefitinib_uM ~ KRAS_variant2, p.adjust.method = "fdr")
+stat.test.gefitinib <- stat.test.gefitinib[stat.test.gefitinib$p.adj < 0.05,]
+
+# Define KRAS variant colors
+mycolors_KRASvariants <- c("WT" = "grey50", "G12A" = "greenyellow", 
+                           "G12C" = "springgreen3", "G12D" = "forestgreen", 
+                           "G12V" = "darkseagreen1", "A146T" = "orange", 
+                           "A146V" = "sienna1", "Q61H" = "purple")
+```
+
+```{r}
+# Plot Afatinib response
+ggplot(drugs, aes(x = KRAS_variant2, y = Afatinib_uM)) +
+  geom_boxplot(lwd = 0.2, outlier.shape = NA) +
+  geom_jitter(aes(color = KRAS_variant), position=position_jitter(0.1), 
+             alpha = 0.5, size = 1) +
+  scale_color_manual(values = mycolors_KRASvariants) +
+  stat_pvalue_manual(stat.test.afatinib, label = "P = {round(p.adj, digits = 5)}", 
+                     vjust = -1, y.position = 2.5, size=1, bracket.size = 0.2) +
+  scale_y_log10()+
+  labs(x = NULL, y = "Afatinib IC50 - log10 scale") +
+  common_ggplot2 +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+        legend.position = "none", 
+        strip.text.x = element_text(size = 6))
+```
+
+```{r}
+# Plot Gefitinib response
+ggplot(drugs, aes(x = KRAS_variant2, y = Gefitinib_uM)) +
+  geom_boxplot(lwd = 0.2, outlier.shape = NA) +
+  geom_jitter(aes(color = KRAS_variant), position=position_jitter(0.1), 
+             alpha = 0.5, size = 1) +
+  scale_color_manual(values = mycolors_KRASvariants) +
+  stat_pvalue_manual(stat.test.gefitinib, label = "P = {round(p.adj, digits = 5)}", 
+                     vjust = -1, y.position = 2.5, size=1, bracket.size = 0.2) +
+  scale_y_log10()+
+  labs(x = NULL, y = "IC50 Gefitinib - log10 scale") +
+  common_ggplot2 +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
+        legend.position = "none", 
+        strip.text.x = element_text(size = 6))
+```
+
+## Panel c - Cell viability assay
+```{r}
+# NOTE: Data for this panel was analyzed in Prism 10
+# Source file: extra information - percentages_cell_title_glo_-EGF.xlsx
+# Analysis: Normalized intensities without EGF treatment
+# This panel shows Western blot/cell viability data that was not analyzed in R
+```
+
+## Panel d - Reproducibility of CRISPR screens (paired organoids)
+```{r}
+# Extract paired organoid data (HCM-SANG-0299-C15-A vs -B)
+CRISPR_LFC_pair <- CRISPR_LFC[grep("HCM-SANG-0299-C15", CRISPR_LFC$sample_ID),]
+CRISPR_LFC_pair <- CRISPR_LFC_pair[CRISPR_LFC_pair$library == "v1_1",]
+CRISPR_LFC_pair$library <- NULL
+
+# Reshape to wide format for comparison
+CRISPR_LFC_pair <- spread(CRISPR_LFC_pair, "sample_ID", "LFC")
+
+# Correlation plot between paired samples
+ggplot(CRISPR_LFC_pair, mapping = aes(x=`HCM-SANG-0299-C15-A`, y=`HCM-SANG-0299-C15-B`)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, linetype="dashed", 
+              color = "red", linewidth = 0.5) +
+  stat_cor(aes(label = after_stat(r.label)), color = "red", geom = "label") +
+  common_ggplot2 +
+  theme(axis.text.x = element_text(angle = 0, hjust = 0.5, vjust = 0),
+        legend.position = "right")
+```
+
+## Panel e - Drug dose-response curves
+```{r}
+# NOTE: Data for this panel was analyzed in Prism 10
+# Source file: extra information - percentages_cell_title_glo_pair.xlsx
+# Model: Sigmoidal, 4PL (4-parameter logistic), X is log(concentration)
+# This panel shows drug dose-response curves that were fitted in Prism
+```
+
+
+# Session info
+```{r sessionInfo, echo=FALSE}
+R version 4.5.0 (2025-04-11)
+Platform: x86_64-apple-darwin20
+Running under: macOS Sequoia 15.7.1
+
+Matrix products: default
+BLAS:   /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Versions/A/libBLAS.dylib 
+LAPACK: /Library/Frameworks/R.framework/Versions/4.5-x86_64/Resources/lib/libRlapack.dylib;  LAPACK version 3.12.1
+
+locale:
+[1] en_US.UTF-8/en_US.UTF-8/en_US.UTF-8/C/en_US.UTF-8/en_US.UTF-8
+
+time zone: Europe/London
+tzcode source: internal
+
+attached base packages:
+[1] stats     graphics  grDevices utils     datasets  methods   base     
+
+other attached packages:
+ [1] clusterProfiler_4.16.0 arrow_21.0.0           ggnewscale_0.5.2       ggpubr_0.6.1           rstatix_0.7.2         
+ [6] cowplot_1.2.0          lubridate_1.9.4        forcats_1.0.0          stringr_1.5.1          dplyr_1.1.4           
+[11] purrr_1.1.0            readr_2.1.5            tidyr_1.3.1            tibble_3.3.0           ggplot2_3.5.2         
+[16] tidyverse_2.0.0        data.table_1.17.8     
+
+loaded via a namespace (and not attached):
+ [1] DBI_1.2.3               gson_0.1.0              rlang_1.1.6             magrittr_2.0.3          DOSE_4.2.0             
+ [6] compiler_4.5.0          RSQLite_2.4.2           png_0.1-8               vctrs_0.6.5             reshape2_1.4.4         
+[11] pkgconfig_2.0.3         crayon_1.5.3            fastmap_1.2.0           backports_1.5.0         XVector_0.48.0         
+[16] tzdb_0.5.0              enrichplot_1.28.4       UCSC.utils_1.4.0        bit_4.6.0               xfun_0.52              
+[21] cachem_1.1.0            aplot_0.2.8             GenomeInfoDb_1.44.1     jsonlite_2.0.0          blob_1.2.4             
+[26] BiocParallel_1.42.1     broom_1.0.9             parallel_4.5.0          R6_2.6.1                stringi_1.8.7          
+[31] RColorBrewer_1.1-3      car_3.1-3               GOSemSim_2.34.0         Rcpp_1.1.0              assertthat_0.2.1       
+[36] knitr_1.50              ggtangle_0.0.7          R.utils_2.13.0          IRanges_2.42.0          igraph_2.1.4           
+[41] Matrix_1.7-3            splines_4.5.0           timechange_0.3.0        tidyselect_1.2.1        qvalue_2.40.0          
+[46] rstudioapi_0.17.1       dichromat_2.0-0.1       abind_1.4-8             codetools_0.2-20        lattice_0.22-6         
+[51] plyr_1.8.9              treeio_1.32.0           Biobase_2.68.0          withr_3.0.2             KEGGREST_1.48.1        
+[56] evaluate_1.0.4          gridGraphics_0.5-1      Biostrings_2.76.0       ggtree_3.16.3           pillar_1.11.0          
+[61] carData_3.0-5           stats4_4.5.0            ggfun_0.2.0             generics_0.1.4          S4Vectors_0.46.0       
+[66] hms_1.1.3               tidytree_0.4.6          scales_1.4.0            glue_1.8.0              lazyeval_0.2.2         
+[71] tools_4.5.0             fgsea_1.34.2            ggsignif_0.6.4          fs_1.6.6                fastmatch_1.1-6        
+[76] grid_4.5.0              ape_5.8-1               AnnotationDbi_1.70.0    colorspace_2.1-1        nlme_3.1-168           
+[81] patchwork_1.3.1         GenomeInfoDbData_1.2.14 Formula_1.2-5           cli_3.6.5               gtable_0.3.6           
+[86] R.methodsS3_1.8.2       yulab.utils_0.2.0       digest_0.6.37           BiocGenerics_0.54.0     ggrepel_0.9.6          
+[91] ggplotify_0.1.2         farver_2.1.2            memoise_2.0.1           R.oo_1.27.1             lifecycle_1.0.4        
+[96] httr_1.4.7              GO.db_3.21.0            bit64_4.6.0-1   
+ 
+```
