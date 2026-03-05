@@ -8,7 +8,7 @@
 
 Comprehensive R pipeline for analyzing CRISPR dependency screens in organoid models, identifying essential genes, biomarkers, and therapeutic vulnerabilities.
 
-**Publication:** A tumour-derived organoid biobank defines a functional map of gene dependencies | *Nature* (2025)
+**Publication:** A tumour-derived organoid biobank defines a functional map of gene dependencies | *Nature* (2026)
 
 ---
 
@@ -35,15 +35,15 @@ source(run_BAGEL2_pr.sh)
             ↓
         Normalized fold changes (TSV files)
             ↓
-        run_BAGEL2_bf.sh (Bash) ← YOU ARE HERE
+        run_BAGEL2_bf.sh (Bash)
             ↓
         BAGEL2 Bayes Factors (.bf files)
             ↓
         BAGEL2 Precision-Recall (.pr files)
             ↓
-        CRISPR_pipeline.R (R) - Import results
+        CRISPR_pipeline.R (R) - Import BAGEL2 results
             ↓
-        Binary essentiality calls
+        Binary essentiality calls (TSV files)
 
 #### 2. Identify core genes
 source("scripts/core_fitness_genes_analysis.R")
@@ -57,7 +57,7 @@ source("scripts/input_biomarker_analysis.R")
 #### 5. Discover biomarkers
 source("scripts/CRISPR_biomarker_analysis.R")
 
-####6. Reproduce main figure of the paper
+#### 6. Reproduce main figure of the paper
 surce(Main_figures.Rmd)
 
 
@@ -116,7 +116,6 @@ Required data types:
 - ADAM: Behan et al., Nature 2019
 - CRISPRcleanR: Iorio et al., BMC Genomics 2018
 - BAGEL2: Kim & Hart, Genome Medicine 2021
-- ComBat: Johnson et al., Biostatistics 2007
 
 ---
 

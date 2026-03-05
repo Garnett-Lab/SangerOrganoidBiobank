@@ -1390,6 +1390,12 @@ ggplot(CRISPR_LFC_ann_COLO[CRISPR_LFC_ann_COLO$gene %in% c("EGFR", "PTPN11", "KR
   common_ggplot2 +
   theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 1),
         strip.text.x = element_text(size = 6))
+
+stat.test.all <- CRISPR_LFC_ann_COLO[CRISPR_LFC_ann_COLO$gene %in% c("EGFR", "KRAS", "PTPN11"),] %>% group_by(gene) %>% wilcox_test(LFC ~ KRAS_variant2, p.adjust.method = "fdr")
+stat.test.noBRAF <- CRISPR_LFC_ann_COLO[CRISPR_LFC_ann_COLO$gene %in% c("EGFR", "PTPN11", "KRAS") & !(CRISPR_LFC_ann_COLO$KRAS_status == "WT" & CRISPR_LFC_ann_COLO$pathway_status3 == "BRAF_mut"),] %>% group_by(gene) %>% wilcox_test(LFC ~ KRAS_variant2, p.adjust.method = "fdr")
+
+# Combine plots and p values manually to create the final panel
+
 ```
 
 ## Panel b - Drug response by KRAS status
