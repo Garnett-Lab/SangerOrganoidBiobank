@@ -58,7 +58,7 @@ source("scripts/input_biomarker_analysis.R")
 source("scripts/CRISPR_biomarker_analysis.R")
 
 #### 6. Reproduce main figure of the paper
-surce(Main_figures.Rmd)
+source(Main_figures.Rmd)
 
 
 ---
