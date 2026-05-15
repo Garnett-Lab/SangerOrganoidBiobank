@@ -103,7 +103,7 @@ availability$overlap_DepMap <- NULL
 
 # Standardize ATCC availability labels
 availability[availability$ATCC == "Available",]$ATCC <- "Yes"
-availability[availability$ATCC == "Deposited",]$ATCC <- "No"
+availability[availability$ATCC == "Unmanufactured",]$ATCC <- "Yes"
 
 # Create combined commercial availability column
 availability$commercially_available <- "No"
@@ -143,12 +143,11 @@ mycolors_availability <- c("Yes" = "navy", "No" = "white", "NA" = "white",
                           "OV" = "orchid1", "PAAD" = "gold", "STAD" = "darkolivegreen3")
 
 # Define feature order for plot
-ORDER_availability <- c("cancer_type(0)", "WGS_available(256)", "RNAseq_available(255)", 
-                        "tumor_available(171)", "CRISPR_available(164)", 
-                        "overlap_HCMI(133)", "commercially_available(183)")
+ORDER_availability <- c("cancer_type(0)", "WGS_available(256)", "RNAseq_available(255)", "tumour_available(171)", 
+                        "CRISPR_available(162)", "overlap_HCMI(133)", "commercially_available(249)")
 
 # Create heatmap
-ggplot(data = availability) +
+AVA_plot <- ggplot(data = availability) +
   geom_tile(aes(x=sample_ID, y=feature2, fill = as.factor(value)), 
             alpha = 0.75, linewidth = 0.01)+
   labs(x= NULL, y= NULL, fill= NULL) +
@@ -160,6 +159,7 @@ ggplot(data = availability) +
         axis.ticks.x = element_blank(),
         legend.position = "none",
         panel.spacing = unit(0.1, "lines"))
+
 ```
 
 ## Panel d - Clinical characteristics of organoid cohort
@@ -1040,7 +1040,7 @@ mycolors_cancer2 <- c("COAD/READ" = "turquoise4", "ESCA" = "chocolate3",
 
 ```{r}
 # Panel a - Number of fitness genes per sample
-ggplot(frequency_binary, aes(x=reorder(sample_library, -Freq), y=Freq, fill = Var3)) + 
+DEP_plot <- ggplot(frequency_binary, aes(x=reorder(sample_library, -Freq), y=Freq, fill = Var3)) + 
   geom_bar(aes(color = Var3), stat = "identity", linewidth = 0.1, width = 0.5) +
   geom_hline(yintercept = median(frequency_binary$Freq)) +
   scale_fill_manual(values = mycolors_cancer2) +
@@ -1051,6 +1051,7 @@ ggplot(frequency_binary, aes(x=reorder(sample_library, -Freq), y=Freq, fill = Va
   theme(axis.text.x=element_blank(),
         axis.ticks.x = element_blank(),
         legend.position = "none")
+
 ```
 
 ```{r}
@@ -1059,7 +1060,7 @@ CRISPR_data$sample_library <- factor(CRISPR_data$sample_library,
                                      levels = frequency_binary[order(frequency_binary$Freq, 
                                                                     decreasing = T),]$sample_library)
 
-ggplot(CRISPR_data, aes(x = sample_library, y = LFC)) +
+LFC_plot <- ggplot(CRISPR_data, aes(x = sample_library, y = LFC)) +
   ggrastr::rasterise(geom_jitter(aes(color = cancer_type), 
                                 position=position_jitter(0.2), 
                                 size = 0.1, alpha = 0.25), dpi = 300) +
@@ -1070,6 +1071,7 @@ ggplot(CRISPR_data, aes(x = sample_library, y = LFC)) +
   theme(axis.text.x=element_blank(),
         axis.ticks.x = element_blank(),
         legend.position = "none")
+
 ```
 
 ## Panels c and d - AUROC and AUPR curves
@@ -1107,9 +1109,9 @@ sample_colors2 <- setNames(as.character(sample_colors$color),
 ```{r}
 # Panel c - ROC curves
 ggplot(ROC_PR_values, aes(x = fpr, y = sensitivity)) + 
-  ggrastr::rasterise(geom_step(aes(color = sanger_ID_library)), dpi = 300) +
+  ggrastr::rasterise(geom_step(aes(color = sanger_ID_library), linewidth = 0.1), dpi = 300) +
   geom_segment(aes(x = 1, xend = 0, y = 1, yend = 0), 
-               color = "grey40", linetype = "dashed") +
+               color = "grey40", linetype = "dashed", linewidth = 0.5) +
   scale_color_manual(values = sample_colors2) +
   labs(x = "Specificity", y = "Sensitivity") +
   ggtitle(paste("Median AUROC = ", round(median(QC_CRISPR$AUC_ROC), digits = 3), sep = "")) + 
@@ -1117,14 +1119,15 @@ ggplot(ROC_PR_values, aes(x = fpr, y = sensitivity)) +
   theme_classic() +
   theme(plot.title=element_text(hjust=0.5, vjust=0.5, face='bold', color = "grey40"),
         legend.position = "none")
+
 ```
 
 ```{r}
 # Panel d - Precision-Recall curves
 ggplot(ROC_PR_values, aes(x = sensitivity, y = precision)) + 
-  ggrastr::rasterise(geom_step(aes(color = sanger_ID_library)), dpi = 300) +
+  ggrastr::rasterise(geom_step(aes(color = sanger_ID_library), linewidth = 0.1), dpi = 300) +
   geom_segment(aes(x = 1, xend = 0, y = 1, yend = 0), 
-               color = "grey40", linetype = "dashed") +
+               color = "grey40", linetype = "dashed", linewidth = 0.5) +
   scale_color_manual(values = sample_colors2) +
   labs(x = "Recall", y = "Precision") +
   ggtitle(paste("Median AUPR = ", round(median(QC_CRISPR$AUC_PR), digits = 3), sep = "")) + 
@@ -1132,6 +1135,7 @@ ggplot(ROC_PR_values, aes(x = sensitivity, y = precision)) +
   theme_classic() +
   theme(plot.title=element_text(hjust=0.5, vjust=0.5, face='bold', color = "grey40"),
         legend.position = "none")
+
 ```
 
 ## Panel e - Genetic constraint analysis
@@ -1171,11 +1175,11 @@ colnames(OT_dataset)[1] <- "ensembl_id"
 OT_dataset2 <- OT_dataset[OT_dataset$ensembl_id %in% CRISPR_data$ensembl_id,]
 OT_dataset2$essential <- ifelse(OT_dataset2$ensembl_id %in% essential$ensembl_id, "Yes", "No")
 OT_dataset2$non_essential <- ifelse(OT_dataset2$ensembl_id %in% non_essential$ensembl_id, "Yes", "No")
-OT_dataset2$core_ORG <- ifelse(OT_dataset2$ensembl_id %in% ORG_PanCancerCoreFitnessGenes$ENSEMBL_ID, "Yes", "No")
+OT_dataset2$core_ORG <- ifelse(OT_dataset2$ensembl_id %in% ORG_PanCancerCoreFitnessGenes$ensembl_id, "Yes", "No")
 OT_dataset2$core_CL <- ifelse(OT_dataset2$ensembl_id %in% PanCancerCoreFitnessGenes$ENSEMBL, "Yes", "No")
-OT_dataset2$diff_fitness_gastrointestinal <- ifelse(OT_dataset2$ensembl_id %in% SUMMARY_filter$ENSEMBL_ID, "Yes", "No")
-OT_dataset2$diff_fitness_COADREAD <- ifelse(OT_dataset2$ensembl_id %in% SUMMARY_COLO_filter$ENSEMBL_ID, "Yes", "No")
-OT_dataset2$diff_fitness_ESCA <- ifelse(OT_dataset2$ensembl_id %in% SUMMARY_OESO_filter$ENSEMBL_ID, "Yes", "No")
+OT_dataset2$diff_fitness_gastrointestinal <- ifelse(OT_dataset2$ensembl_id %in% SUMMARY_filter$ensembl_id, "Yes", "No")
+OT_dataset2$diff_fitness_COADREAD <- ifelse(OT_dataset2$ensembl_id %in% SUMMARY_COLO_filter$ensembl_id, "Yes", "No")
+OT_dataset2$diff_fitness_ESCA <- ifelse(OT_dataset2$ensembl_id %in% SUMMARY_OESO_filter$ensembl_id, "Yes", "No")
 
 # Calculate frequencies of genetic constraint categories
 OT_freq <- OT_dataset2[,c("ensembl_id", "geneticConstraint_bucket", "essential", 
@@ -1228,6 +1232,7 @@ ggplot(OT_freq_GC, aes(x=Var2, y = perc, fill = Var1)) +
         panel.border = element_blank(),
         axis.line = element_line(linewidth = 0.2),
         legend.position = "none")
+
 ```
 
 ## Panel f - Priority biomarkers and genetic constraint
@@ -1240,6 +1245,9 @@ colnames(priority_score_GAST)[1] <- "gene"
 gene_names <- unique(CRISPR_binary[,c("gene", "ensembl_id")])
 OT_dataset <- merge(gene_names, OT_dataset, by = "ensembl_id")
 priority_score_GAST <- merge(priority_score_GAST, OT_dataset, by = "gene")
+
+SUMMARY_filter_mean <- SUMMARY_filter[,c("gene", "MEAN_LFC")]
+priority_score_GAST <- merge(SUMMARY_filter_mean, priority_score_GAST, by = "gene")
 
 # Statistical testing for genetic constraint effects
 stat.test <- priority_score_GAST[!priority_score_GAST$geneticConstraint_bucket == "NA",] %>% 
@@ -1256,7 +1264,7 @@ priority_score_GAST$geneticConstraint_bucket <- factor(
 mycolors_biomarkers <- c("C" = "#F1BB7B", "B" = "#FD6467", "A" = "#5B1A18", "No" = "grey90")
 
 # Plot LFC by genetic constraint with biomarker highlighting
-ggplot(priority_score_GAST[!priority_score_GAST$geneticConstraint_bucket == "NA",], 
+GAST_plot <- ggplot(priority_score_GAST[!priority_score_GAST$geneticConstraint_bucket == "NA",], 
        aes(x = geneticConstraint_bucket, y = MEAN_LFC))+
   geom_boxplot(lwd = 0.2, outlier.shape = NA) +
   geom_jitter(aes(color = biomarker_class, alpha = biomarker_class), 
@@ -1270,6 +1278,7 @@ ggplot(priority_score_GAST[!priority_score_GAST$geneticConstraint_bucket == "NA"
   common_ggplot2 +
   theme(axis.text.x = element_text(angle = 0, hjust = 0.5, vjust = 0),
         legend.position = "none")
+
 ```
 
 
@@ -1364,7 +1373,7 @@ CRISPR_LFC_ann_COLO$KRAS_variant2 <- factor(CRISPR_LFC_ann_COLO$KRAS_variant2,
 CRISPR_LFC_ann_COLO$gene <- factor(CRISPR_LFC_ann_COLO$gene, levels = c("KRAS", "EGFR", "PTPN11"))
 
 # Plot dependency by KRAS status (all samples)
-ggplot(CRISPR_LFC_ann_COLO[CRISPR_LFC_ann_COLO$gene %in% c("EGFR", "PTPN11", "KRAS"),], 
+A_plot <- ggplot(CRISPR_LFC_ann_COLO[CRISPR_LFC_ann_COLO$gene %in% c("EGFR", "PTPN11", "KRAS"),], 
        aes(x = KRAS_variant2, y = LFC))+
   geom_boxplot(lwd = 0.2, outlier.shape = NA) +
   geom_jitter(aes(color = pathway_status3), position=position_jitter(0.1), 
@@ -1378,8 +1387,8 @@ ggplot(CRISPR_LFC_ann_COLO[CRISPR_LFC_ann_COLO$gene %in% c("EGFR", "PTPN11", "KR
         strip.text.x = element_text(size = 6))
 
 # Plot dependency excluding BRAF mutants with KRAS WT
-ggplot(CRISPR_LFC_ann_COLO[CRISPR_LFC_ann_COLO$gene %in% c("EGFR", "PTPN11", "KRAS") & 
-                           !(CRISPR_LFC_ann_COLO$KRAS_status == "WT" & 
+B_plot <- ggplot(CRISPR_LFC_ann_COLO[CRISPR_LFC_ann_COLO$gene %in% c("EGFR", "PTPN11", "KRAS") & 
+                           !(CRISPR_LFC_ann_COLO$KRAS_variant == "WT" & 
                              CRISPR_LFC_ann_COLO$pathway_status3 == "BRAF_mut"),], 
        aes(x = KRAS_variant2, y = LFC))+
   geom_boxplot(lwd = 0.2, outlier.shape = NA) +
@@ -1392,7 +1401,7 @@ ggplot(CRISPR_LFC_ann_COLO[CRISPR_LFC_ann_COLO$gene %in% c("EGFR", "PTPN11", "KR
         strip.text.x = element_text(size = 6))
 
 stat.test.all <- CRISPR_LFC_ann_COLO[CRISPR_LFC_ann_COLO$gene %in% c("EGFR", "KRAS", "PTPN11"),] %>% group_by(gene) %>% wilcox_test(LFC ~ KRAS_variant2, p.adjust.method = "fdr")
-stat.test.noBRAF <- CRISPR_LFC_ann_COLO[CRISPR_LFC_ann_COLO$gene %in% c("EGFR", "PTPN11", "KRAS") & !(CRISPR_LFC_ann_COLO$KRAS_status == "WT" & CRISPR_LFC_ann_COLO$pathway_status3 == "BRAF_mut"),] %>% group_by(gene) %>% wilcox_test(LFC ~ KRAS_variant2, p.adjust.method = "fdr")
+stat.test.noBRAF <- CRISPR_LFC_ann_COLO[CRISPR_LFC_ann_COLO$gene %in% c("EGFR", "PTPN11", "KRAS") & !(CRISPR_LFC_ann_COLO$KRAS_variant == "WT" & CRISPR_LFC_ann_COLO$pathway_status3 == "BRAF_mut"),] %>% group_by(gene) %>% wilcox_test(LFC ~ KRAS_variant2, p.adjust.method = "fdr")
 
 # Combine plots and p values manually to create the final panel
 
